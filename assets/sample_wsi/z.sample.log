@@ -1,0 +1,10 @@
+==============================
+sample.svs
+None
+Loading slide: sample.svs
+sample: 40.0x, mpp: 0.2457->0.2457, size: [13347, 31872]->[13347, 31872], patch: 512(64)->512(64), roi: 28.33% (664 patches)
+Inference time: 16.17939043045044 s
+Total time: 16.332767486572266 s
+Exporting result to image: 20.308661699295044 s
+Exporting result to csv: 0.9711277484893799 s
+==============================

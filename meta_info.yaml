@@ -1,0 +1,25 @@
+classes:
+- bg
+- tumor
+- stromal
+- sTILs
+- blood
+- macrophage
+- dead
+labels_color:
+  -100: '#949494'
+  0: '#ffffff'
+  1: '#00ff00'
+  2: '#ff0000'
+  3: '#0000ff'
+  4: '#ff00ff'
+  5: '#ffff00'
+  6: '#0094e1'
+labels_text:
+  -100: unlabeled
+  1: tumor
+  2: stromal
+  3: sTILs
+  4: blood
+  5: macrophage
+  6: dead
