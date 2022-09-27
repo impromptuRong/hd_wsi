@@ -74,7 +74,6 @@ def main(args):
         res_file = os.path.join(args.output_dir, f"{slide_id}.pt")
         res_file_masks = os.path.join(args.output_dir, f"{slide_id}.masks.pt")
         
-        outputs = {}
         print("==============================")
         if not os.path.exists(res_file):
             t0 = time.time()
@@ -85,26 +84,33 @@ def main(args):
                                         batch_size=args.batch_size, 
                                         n_workers=args.num_workers, 
                                         nms_params={}, device=device)
-            # we save nuclei masks in a separate file to speed up features extraction without mask.
-            if not args.box_only and 'masks' in outputs['cell_stats']:
-                nuclei_masks = outputs['cell_stats']['masks']
-                torch.save(nuclei_masks, res_file_masks)
-            if 'masks' in outputs['cell_stats']:
-                del outputs['cell_stats']['masks']
             outputs['meta_info'] = meta_info
             outputs['slide_info'] = dataset.slide.info()
             outputs['slide_size'] = dataset.slide_size
             outputs['rois'] = dataset.masks
-            torch.save(outputs, res_file)
 
+            # we save nuclei masks in a separate file to speed up features extraction without mask.
+            if 'masks' in outputs['cell_stats']:
+                output_masks = outputs['cell_stats']['masks']
+                del outputs['cell_stats']['masks']
+                torch.save(output_masks, res_file_masks)
+                torch.save(outputs, res_file)
+                outputs['cell_stats']['masks'] = output_masks
+            else:
+                torch.save(outputs, res_file)
             print(f"Total time: {time.time()-t0} s")
+        else:
+            outputs = {}
 
         if args.save_img:
             img_file = os.path.join(args.output_dir, f"{slide_id}.png")
             if not os.path.exists(img_file):
                 print(f"Exporting result to image: ", end="")
                 t0 = time.time()
-                outputs = torch.load(res_file) if not outputs else outputs
+                if not outputs:
+                    outputs = torch.load(res_file)
+                    if not args.box_only and os.path.exists(res_file_masks):
+                        outputs['cell_stats']['masks'] = torch.load(res_file_masks)
                 mask = export_detections_to_image(
                     outputs['cell_stats'], outputs['slide_size'], 
                     labels_color=outputs['meta_info']['labels_color'],
@@ -118,7 +124,10 @@ def main(args):
             if not os.path.exists(csv_file):
                 print(f"Exporting result to csv: ", end="")
                 t0 = time.time()
-                outputs = torch.load(res_file) if not outputs else outputs
+                if not outputs:
+                    outputs = torch.load(res_file)
+                    if not args.box_only and os.path.exists(res_file_masks):
+                        outputs['cell_stats']['masks'] = torch.load(res_file_masks)
                 if args.export_text and 'labels_text' in outputs['meta_info']:
                     labels_text = outputs['meta_info']['labels_text']
                 else:

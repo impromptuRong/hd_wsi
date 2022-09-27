@@ -2342,6 +2342,7 @@ class Slide(object):
         self.mpp = None
         self.description = None
         self.level_dims = []
+        self.level_orders = []
         try:
             if verbose:
                 print(f"Loading slide: {self.svs_file}")
@@ -2370,7 +2371,10 @@ class Slide(object):
                     if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
                         level_dims.append((w, h))
                         scales.append(level_dims[0][0]/w)
-                self.level_dims = [x for _, x in sorted(zip(scales, level_dims))]
+                # self.page_indices = sorted(range(len(scales)), key=lambda x: scales[x])
+                # self.level_dims = [x for _, x in sorted(zip(scales, level_dims))]
+                self.level_dims = level_dims
+                self.level_orders = sorted(range(len(scales)), key=lambda x: scales[x])
 
             # self.slide = open_slide(svs_file)
             # self.level_dims = self.slide.level_dimensions
@@ -2435,25 +2439,30 @@ class Slide(object):
         # return np.where(np.all(np.array(scales) < 1, axis=-1))[0][-1]
         return abs(np.array(scales).min(1)-1).argmin()
     
-    def get_patch(self, slide, x=None, level=0):
+    def get_patch(self, slide, x=None, level=0, engine='openslide'):
         ## TODO: change level to image_size, support get_patch on any dimension
         if x is None:
-            x0, y0, (w, h) = 0, 0, self.level_dims[level]
+            return self.get_page(level)
         else:
             x0, y0, w, h = x
-        scale = slide.level_downsamples[level]
+        ## openslide reordered page index according to page size, and may missing levels.
+        openslide_level_dims = slide.level_dimensions
+        openslide_level_idx = self.level_orders[level] % len(openslide_level_dims)
+        
+        scale = slide.level_downsamples[openslide_level_idx]
         x0, y0 = int(x0 * scale), int(y0 * scale)
-        patch = slide.read_region((x0, y0), level%len(self.level_dims), (w, h))
+        patch = slide.read_region((x0, y0), openslide_level_idx, (w, h))
         
         return np.array(patch)
     
     def get_page(self, level=0):
         with open(self.svs_file, 'rb') as fp:
             slide = TiffFile(fp)
-            w, h = self.level_dims[level]
-            for page in slide.pages:
-                if page.shape[0] == h and page.shape[1] == w:
-                    return page.asarray()
+            return slide.pages[level].asarray()
+#             w, h = self.level_dims[level]
+#             for page in slide.pages:
+#                 if page.shape[0] == h and page.shape[1] == w:
+#                     return page.asarray()
     
     def thumbnail(self, image_size=None, memory_limit=None):
         """ return a thumbnail in PIL image format.
@@ -2579,7 +2588,7 @@ class Slide(object):
             if isinstance(masks, str):
                 polygons = self.get_annotations(pattern=masks)
                 if not polygons:
-                    print("No roi match masks: {masks}, will use whole slides.")
+                    print(f"No roi match masks: {masks}, will use whole slides.")
                     polygons = [np.array([[0, 0], [0, h], [w, h], [w, 0]])]
                 else:
                     polygons = [np.array(_) * scales[0] for _ in polygons]
@@ -2597,7 +2606,7 @@ class Slide(object):
                 mask_img = self.polygons2mask(polygons, (w, h), scale=1.)
                 h_m, w_m = h, w
             else:
-                raise ValueError("{} is not supported.".format(type(masks)))
+                raise ValueError(f"{type(masks)} is not supported.")
             bboxes = [np.concatenate([np.floor(np.min(_, axis=0)), np.ceil(np.max(_, axis=0))]).astype(np.int)
                       for _ in polygons]
         
@@ -2664,7 +2673,7 @@ class Slide(object):
         elif isinstance(masks, str):
             polygons = self.get_annotations(pattern=masks)
             if not polygons:
-                print("No roi match masks: {masks}, will use whole slides.")
+                print(f"No roi match masks: {masks}, will use whole slides.")
                 polygons = [np.array([[0, 0], [0, h], [w, h], [w, 0]])]
             else:
                 polygons = [np.array(_) * scales[0] for _ in polygons]
@@ -2687,8 +2696,9 @@ class Slide(object):
         coords[:,1] = np.clip(coords[:,1], 0, h - patch_size[1])
         patches = np.hstack([coords.astype(np.int), np.tile(patch_size, (pool_size, 1))])
         
-        ## generate mask and calculate iou (on the lowest resolution to save time)
-        masks = self.polygons2mask(polygons, shape=self.level_dims[-1], scale=1./scales[-1])
+        ## generate mask and calculate iou (project on low resolution to save time)
+        level_idx = self.get_resize_level((1024, 1024))
+        masks = self.polygons2mask(polygons, shape=self.level_dims[level_idx], scale=1./scales[level_idx])
         ious = np.array([np.sum(masks[y0:y0+dh, x0:x0+dw])/dw/dh 
                          for x0, y0, dw, dh in (patches / np.tile(scales[-1], 2)).astype(np.int)])
         ## use output resolution (slow)

@@ -30,7 +30,7 @@ DATASET_CONFIGS = {
     'patch_size': 512,
     'padding': 64,
     'mpp': 0.25,
-    'level': 0,
+    'page': 0,
     'labels': ['bg', 'tumor', 'stroma', 'immune'],
     'labels_color': {'bg': '#ffffff', 'tumor': '#00ff00', 'stroma': '#ff0000', 'immune': '#0000ff'},
     'labels_text': {0: 'bg', 1: 'tumor', 2: 'stroma', 3: 'immune'},
@@ -78,17 +78,15 @@ def processor(patch, info, **kwargs):
 
 
 class WholeSlideDataset(torch.utils.data.Dataset):
-    def __init__(self, svs_file, patch_size=512, padding=64, mpp=0.25, level=0, 
+    def __init__(self, svs_file, patch_size=512, padding=64, mpp=0.25, page=0, 
                  ann_file=None, masks=None, processor=None, **kwargs):
         self.slide_id, self.svs_file, self.ann_file = get_slide_and_ann_file(svs_file, ann_file)
-        print(f"{self.svs_file}")
-        print(f"{self.ann_file}")
 
         self.slide = Slide(self.svs_file, self.ann_file)
         self.slide_handle = open_slide(self.svs_file)
-        self.level = level
-        self.slide_size = [self.slide.level_dims[level][1], self.slide.level_dims[level][0]]
-        assert padding % (patch_size/64) == 0, f"padding {padding} should be divisible by {patch_size/64}."
+        self.page = page
+        self.slide_size = [self.slide.level_dims[page][1], self.slide.level_dims[page][0]]
+        assert padding % (patch_size/64) == 0, f"Padding {padding} should be divisible by {patch_size/64}."
         self.patch_size = patch_size
         self.padding = padding
         # self.mpp = mpp
@@ -119,16 +117,17 @@ class WholeSlideDataset(torch.utils.data.Dataset):
             else:
                 self.masks = self.slide.get_annotations(pattern=masks)
         elif callable(masks):
-            img = np.array(self.slide.get_patch(level=(-1)))
+            level_idx = self.slide.get_resize_level((1024, 1024))
+            img = self.slide.get_page(level=level_idx)
             self.masks = masks(img)
         else:
             self.masks = masks
         # print(f"generate masks: {time.time()-st}")
         
         self.patches, self.polygons, self.poly_indices = self.slide.whole_slide_scanner(
-            self.window_size, level=self.level, masks=self.masks, coverage_threshold=0.,
+            self.window_size, self.page, masks=self.masks, coverage_threshold=0.,
         )
-        pars = self.slide.pad_roi(self.patches, self.patch_size, self.level, padding=self.window_padding)
+        pars = self.slide.pad_roi(self.patches, self.patch_size, self.page, padding=self.window_padding)
         pars += (self.poly_indices,)
         
         self.images = []
@@ -148,7 +147,7 @@ class WholeSlideDataset(torch.utils.data.Dataset):
 
     def load_patch(self, idx):
         info = self.images[idx]['data']
-        patch = np.array(self.slide.get_patch(self.slide_handle, info['coord'], level=0))
+        patch = np.array(self.slide.get_patch(self.slide_handle, info['coord'], 0))
         patch = img_as('float32')(rgba2rgb(patch))
         pad_width = [(info['pad_width'][0], info['pad_width'][1]),
                      (info['pad_width'][2], info['pad_width'][3])]
