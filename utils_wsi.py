@@ -52,6 +52,11 @@ def collate_fn(batch):
     return tuple(zip(*batch))
 
 
+def is_image_file(x):
+    ext = os.path.splitext(x)[1].lower()
+    return not x.startswith('.') and ext in ['.png', '.jpeg', '.jpg', '.tif', '.tiff']
+
+
 def get_slide_and_ann_file(svs_file, ann_file=None):
     folder_name, file_name = os.path.split(svs_file)
     slide_id, ext = os.path.splitext(file_name)
@@ -391,7 +396,8 @@ def export_detections_to_image(res, img_size, labels_color, save_masks=True, bor
             else:  # draw rectangle
                 mask = torch.ones((y_1-y_0, x_1-x_0)) * label
                 mask[border:-border, border:-border] = 0
-            img_label[y_0:y_1, x_0:x_1] = mask
+            img_label[y_0:y_1, x_0:x_1] = torch.maximum(img_label[y_0:y_1, x_0:x_1], mask)
+            # img_label[y_0:y_1, x_0:x_1] = mask # box will overwrite seg with 0
 
     return F.embedding(img_label, color_tensor).numpy()
 
