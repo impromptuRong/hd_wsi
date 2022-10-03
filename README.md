@@ -1,4 +1,4 @@
-# Histological based Whole Slide Nuclei Segmentation and TME Feature Extraction Pipeline
+# Histological based Patch Segmentatin, Whole Slide Nuclei Segmentation and TME Feature Extraction Pipeline
 
 ![QBRC logo](assets/qbrc.jpeg)
 
@@ -7,15 +7,22 @@ Author: **Ruichen Rong** (ruichen.rong@utsouthwestern.edu)
 
 
 ## Introduction
-This pipeline is designed for whole slide level nuclei detection, segmentation and TME feature extraction. The pipeline contains two components. 
+This pipeline is designed for image patch and whole slide level nuclei detection, segmentation and TME feature extraction. The pipeline contains three components. 
 
-The first component applies a pretrained object detection/segmentation model on whole slide images and outputs nuclei locations, types and masks. 
+The first component (`run_patch_inference.py`) runs a pretrained object detection/segmentation model on image patchs and outputs nuclei locations, types and masks. 
+
+   Sample input slide      |    Nuclei segmentation
+:-------------------------:|:-------------------------:
+<img src="assets/9388_1_1.png" width="600"/>|<img src="assets/9388_1_1_pred.png" width="600"/>
+
+
+The second component (`run_wsi_inference.py`) applies a pretrained object detection/segmentation model on whole slide images and outputs nuclei locations, types and masks. 
 
    Sample input slide      |    Nuclei segmentation
 :-------------------------:|:-------------------------:
 <img src="assets/sample_tme/images/sample.slide_img.png" width="600"/>|<img src="assets/sample_wsi/sample.png" width="600"/>
 
-The second component utilizes density-based feature extraction module to summarize slide level as well as ROI level TME features. All nuclei detected above will be allocated into a 2d point cloud and further smoothed into a density maps that reflect nuclei distribution. Then multiple Delaunay graph based and density based TME features will be calculated.
+The third component (`summarize_tme_features.py`) utilizes density-based feature extraction module to summarize slide level as well as ROI level TME features. All nuclei detected above will be allocated into a 2d point cloud and further smoothed into a density maps that reflect nuclei distribution. Then multiple Delaunay graph based and density based TME features will be calculated.
 
    Nuclei scatter plot     |    Nuclei density plot
 :-------------------------:|:-------------------------:
@@ -23,7 +30,7 @@ The second component utilizes density-based feature extraction module to summari
 
 
 ## Installation
-Dependencies can be installed through conda environment. A GPU device is required to run the script on large amount of data. GPU memory depends on the model size and batch size. By default, the `Yolo_mask` model takes 12GB memory for optimized performance. 
+Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI script (`run_wsi_inference.py`) on large dataset. GPU memory depends on the model size and batch size. By default, the `Yolo_mask` model takes 12GB memory for optimized performance. 
 
 ### Build conda environment on BioHPC
 Step 1. Login into a delegate GPU node and load modules(e.g. 172.18.225.252, 172.18.227.84, 172.18.227.85)
@@ -47,7 +54,21 @@ When building pipeline with customized model, the pytorch model should be in eva
 
 
 ## User Guideline
-### a) Whole slide nuclei detection
+### a) Image patch nuclei segmentation
+The script `run_patch_inference.py` analyzes a single image patch or a folder of image patches with given model and outputs nuclei detection and segmentation results. Image patches are analyzed one-by-one without batch parallel, so image patches with different sizes are allowed. By default, model uses breast cancer `Yolo_mask` model for the following nuclei: tumor, stromal, immune, blood, and others. mpp need to be specified with option `--mpp`. The script will automatically align image patch scale to default model scale (mpp=0.25, 40x) during inference and convert result to the original input size. Run `python run_patch_inference.py -h` for all options.
+
+Example 1. Produce the result of a 40x lung cancer image patch displayed in the introduction:
+```
+python run_patch_inference.py --data_path assets/9388_1_1.png --output_dir ./ --device cpu
+```
+
+Example 2. Run lots of 20x patches with mpp=0.5 on GPU
+```
+python run_patch_inference.py --data_path /path/to/patch_folder --output_dir /path/to/output_patches --mpp 0.5
+```
+
+
+### b) Whole slide nuclei detection and segmentation
 The script `run_wsi_inference.py` accepts a single slide or a folder of slides as inputs and outputs nuclei detection and segmentation results from given model. By default, model uses breast cancer `Yolo_mask` model for the following nuclei: tumor, stromal, immune, blood, and others. Slides with different magnification and mpp will be aligned to mpp=0.25 (40x) during inference but convert back to the original mpp and scale in results. Run `python run_wsi_inference.py -h` for all options.
 
 
@@ -73,7 +94,7 @@ CUDA_VISIBLE_DEVICES=1 python -u run_wsi_inference.py \
 --export_mask --export_text
 ```
 
-### b) TME feature extraction
+### c) TME feature extraction
 The script `summarize_tme_features.py` takes the outputs from *a)* to extract a variety of TME features. Currently, the following TME features are calculated:
 <details>
     <summary> Delaunay graph based features </summary>
@@ -117,14 +138,19 @@ CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py \
 
 
 ## Result files
-### a) Whole slide nuclei detection
-1. `slide_id.pt`: The compressed object contains slide information, nuclei locations, scores and types
+### a) Image patch nuclei segmentation
+1. `slide_id_pred.pt`: The torch file stores the outputs and inference time.
+2. `slide_id_pred.png`: The image file displays the segmentation/detection results.
+3. `slide_id_pred.csv`: The csv file contains `boxes`, `scores`, `labels` and `masks` info if `--box_only` is not triggered.
+
+### b) Whole slide nuclei detection and segmentation
+1. `slide_id.pt`: The compressed object contains slide information, nuclei locations, scores and types, as well as inference time.
 2. `slide_id.masks.pt`: If model outputs masks and `--box_only` is not enabled, all nuclei masks shrinked into 28x28 pixel are stored in this file.
 3. `slide_id.png`: If `--save_img` is enabled, script will plot a large png image with the same size as input slide (nuclei color are provided through `--meta_info`). Don't enable this option for large image as it will take extremely long time to plot and save.
 4. `slide_id.csv`: If `--save_csv` is enabled, script will export `boxes`, `scores`, `labels` into this csv file. If `--export_text` is enabled, script will replace numeric labels with text labels defined in `--meta_info`. If `--export_mask` is enabled, an extra column contains masks in polygon format will be added to the csv file. Note that TME feature extraction pipeline takes `slide_id.pt` as input, the csv file is not necessary for downstream analysis. Export csv with text and masks will cost extra time and take more space.
 
 
-### b) TME feature extraction
+### c) TME feature extraction
 1. `slide_id/nuclei_features.csv`: The csv file of slide_id x tme_features. Currently the following TME features are calculated. 
 2. `slide_id/nuclei_features.pkl`: The pickle file contains all the raw features without normalization/standardization (count, norm, dotproduct, etc.). This is useful when merging multiple slides under same patient.
 3. `slide_id.slide_img.png`: If `--save_images` is enabled, script will generate this thumbnail image. 
