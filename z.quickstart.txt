@@ -1,6 +1,9 @@
 ## Create a conda environment
 conda env create --prefix /path/to/conda/env/ -f z.ml_env2_1.10.1.yaml
 
+## Run patch segmentation for sample image
+python -u run_patch_inference.py --data_path assets/9388_1_1.png --output_dir ./
+
 ## Run whole slide inference with default options
 CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
 

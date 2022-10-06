@@ -11,7 +11,7 @@ This pipeline is designed for image patch and whole slide level nuclei detection
 
 The first component (`run_patch_inference.py`) runs a pretrained object detection/segmentation model on image patchs and outputs nuclei locations, types and masks. 
 
-   Sample input slide      |    Nuclei segmentation
+   Sample input patch      |    Nuclei segmentation
 :-------------------------:|:-------------------------:
 <img src="assets/9388_1_1.png" width="600"/>|<img src="assets/9388_1_1_pred.png" width="600"/>
 
@@ -22,7 +22,7 @@ The second component (`run_wsi_inference.py`) applies a pretrained object detect
 :-------------------------:|:-------------------------:
 <img src="assets/sample_tme/images/sample.slide_img.png" width="600"/>|<img src="assets/sample_wsi/sample.png" width="600"/>
 
-The third component (`summarize_tme_features.py`) utilizes density-based feature extraction module to summarize slide level as well as ROI level TME features. All nuclei detected above will be allocated into a 2d point cloud and further smoothed into a density maps that reflect nuclei distribution. Then multiple Delaunay graph based and density based TME features will be calculated.
+The third component (`summarize_tme_features.py`) extract nuclei morphological features and further utilizes density-based feature extraction module to summarize slide level and ROI level TME features. All nuclei detected above will be allocated into a 2d point cloud and further smoothed into a density maps that reflect nuclei distribution. Then multiple Delaunay graph based and density based TME features will be calculated.
 
    Nuclei scatter plot     |    Nuclei density plot
 :-------------------------:|:-------------------------:
@@ -94,28 +94,49 @@ CUDA_VISIBLE_DEVICES=1 python -u run_wsi_inference.py \
 --export_mask --export_text
 ```
 
-### c) TME feature extraction
-The script `summarize_tme_features.py` takes the outputs from *a)* to extract a variety of TME features. Currently, the following TME features are calculated:
+### c) Nuclei and TME feature extraction
+The script `summarize_tme_features.py` takes the outputs from *a)* to extract a variety of nuclei and TME features. Currently, the following nuclei features and TME features are calculated:
+<details>
+    <summary> Nuclei morphological features </summary>
+    <ul>
+        <li> i.radius: average radius for nuclei type_i base on bounding bx size. </li>
+        <li> i.total: total amount of nuclei type_i detected in results file. </li>
+        <li> i.box_area.*: statistics of bounding box area of type_i. </li>
+        <li> i.area.*: statistics of mask area of type_i. </li>
+        <li> i.convex_area.*: statistics of mask convex_area of type_i. </li>
+        <li> i.eccentricity.*: statistics of mask eccentricity of type_i. </li>
+        <li> i.extent.*: statistics of mask extent of type_i. </li>
+        <li> i.filled_area.*: statistics of mask filled_area of type_i. </li>
+        <li> i.major_axis_length.*: statistics of mask major_axis_length of type_i. </li>
+        <li> i.minor_axis_length.*: statistics of mask minor_axis_length of type_i. </li>
+        <li> i.orientation.*: statistics of mask orientation of type_i. </li>
+        <li> i.perimeter.*: statistics of mask perimeter of type_i. </li>
+        <li> i.solidity.*: statistics of mask solidity of type_i. </li>
+        <li> i.pa_ratio.*: statistics of mask pa_ratio (perimeter ** 2 / filled_area) of type_i. </li>
+    </ul>
+</details>
+
 <details>
     <summary> Delaunay graph based features </summary>
     <ul>
-    <li> i_j.edges.mean: average nuclei distance of type_i &lt;-&gt; type_j interactions. </li>
-    <li> i_j.edges.std: nuclei distances std of type_i &lt;-&gt; type_j interactions. </li>
-    <li> i_j.edges.count: total No. of type_i &lt;-&gt; type_j interactions in all patches. </li>
-    <li> i_j.edges.marginal.prob: i_j.edges.count/sum(x_y.edges.count), percentage of type_i &lt;-&gt; type_j interaction. </li>
-    <li> i_j.edges.conditional.prob: i_j.edges.count/sum(x_j.edges.count), edge probability condition to type_j interaction. </li>
-    <li> i_j.edges.dice: dice coefficient of i_x.edges and y_j.edges, overlap over union of type_i interaction and type_j interaction. </li>
+        <li> i_j.edges.mean: average nuclei distance of type_i &lt;-&gt; type_j interactions. </li>
+        <li> i_j.edges.std: nuclei distances std of type_i &lt;-&gt; type_j interactions. </li>
+        <li> i_j.edges.count: total No. of type_i &lt;-&gt; type_j interactions in all patches. </li>
+        <li> i_j.edges.marginal.prob: i_j.edges.count/sum(x_y.edges.count), percentage of type_i &lt;-&gt; type_j interaction. </li>
+        <li> i_j.edges.conditional.prob: i_j.edges.count/sum(x_j.edges.count), edge probability condition to type_j interaction. </li>
+        <li> i_j.edges.dice: dice coefficient of i_x.edges and y_j.edges, overlap over union of type_i interaction and type_j interaction. </li>
     </ul>
 </details>
 
 <details>
     <summary>Density based features </summary>
     <ul>
-    <li> i_j.dot: dot product between type_i and type_j.
-    <li> i.norm: norm2(type_i), type_i density. </li>
-    <li> i_j.proj: i_j.dot / j.norm, influence of type_i on type_j. </li>
-    <li> i_j.proj.prob: use sigmoid activation to normalize i_j.proj into 0~1. </li>
-    <li> i_j.cos: i_j.dot/i.norm/j.norm, similarity of type_i and type_j. </li>
+        <li> roi_area: overall tumor/tissue region.
+        <li> i_j.dot: dot product between type_i and type_j.
+        <li> i.norm: norm2(type_i), type_i density. </li>
+        <li> i_j.proj: i_j.dot / j.norm, influence of type_i on type_j. </li>
+        <li> i_j.proj.prob: use sigmoid activation to normalize i_j.proj into 0~1. </li>
+        <li> i_j.cos: i_j.dot/i.norm/j.norm, similarity of type_i and type_j. </li>
     </ul>
 </details>
 
@@ -123,7 +144,7 @@ By default, Delaunay graph based features are summarized from a maximum of 10 ra
 
 Example 1. Analyze results from `sample.svs` and save plots with default settings.
 ```
-CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path test_wsi --output_dir ./test_features --save_images
+CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path test_wsi --output_dir ./test_features --n_classes 3 --save_images
 ```
 
 Example 2. Customize Delaunay graph based and density based features: randomly select 100 512x512 patches with more than 10 tumor and calculate density under 1/16
@@ -151,8 +172,8 @@ CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py \
 
 
 ### c) TME feature extraction
-1. `slide_id/nuclei_features.csv`: The csv file of slide_id x tme_features. Currently the following TME features are calculated. 
-2. `slide_id/nuclei_features.pkl`: The pickle file contains all the raw features without normalization/standardization (count, norm, dotproduct, etc.). This is useful when merging multiple slides under same patient.
+1. `slide_id/feature_summary.csv`: The csv file of slide_id x tme_features. Currently the following TME features are calculated. 
+2. `slide_id/feature_summary.pkl`: The pickle file contains all the raw features without normalization/standardization (count, norm, dotproduct, etc.). This is useful when merging multiple slides under same patient.
 3. `slide_id.slide_img.png`: If `--save_images` is enabled, script will generate this thumbnail image. 
 4. `slide_id.scatter_img.png`: If `--save_images` is enabled, script will generate a scatter plot for detection result.
 5. `slide_id.density_img.png`: If `--save_images` is enabled, script will export density plot for core nuclei type (by default, green: tumor, red: stromal, blue: immune). 

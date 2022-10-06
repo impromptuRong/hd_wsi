@@ -10,24 +10,39 @@ import pandas as pd
 import scipy
 import scipy.spatial
 
+import cv2
 import itertools
+# import multiprocessing as mp
 from functools import reduce
 from collections import Counter
 from scipy.signal import fftconvolve, convolve
 
 import skimage.morphology
 
-from utils_image import random_sampling_in_polygons, binary_mask_to_polygon, polygon_areas
+from utils_image import random_sampling_in_polygons, binary_mask_to_polygon, polygon_areas, ObjectProperties
 
 #
 """ Nuclei feature codes:
     1. Nuclei features.
     roi_area: overall tumor/tissue region.
-    i.radius: average radius for nuclei type_i.
-    i.count: total No. of nuclei type_i.
-    i.count.prob: percentage of nuclei type_i.
+    i.radius: average radius for nuclei type_i base on bounding bx size.
+    i.total: total amount of nuclei type_i detected in results file.
+    i.box_area.*: statistics of bounding box area of type_i.
+    i.area.*: statistics of mask area of type_i.
+    i.convex_area.*: statistics of mask convex_area of type_i.
+    i.eccentricity.*: statistics of mask eccentricity of type_i.
+    i.extent.*: statistics of mask extent of type_i.
+    i.filled_area.*: statistics of mask filled_area of type_i.
+    i.major_axis_length.*: statistics of mask major_axis_length of type_i.
+    i.minor_axis_length.*: statistics of mask minor_axis_length of type_i.
+    i.orientation.*: statistics of mask orientation of type_i.
+    i.perimeter.*: statistics of mask perimeter of type_i.
+    i.solidity.*: statistics of mask solidity of type_i.
+    i.pa_ratio.*: statistics of mask pa_ratio (perimeter ** 2 / filled_area) of type_i.
 
-    1. Discrete features (delaunary graph based): select (maximum 10) random patches (default 2048*2048) in tumor region.
+    2. Delaunary graph based features: select (maximum 10) random patches (default 2048*2048) in tumor region.
+    i.count: total No. of nuclei type_i in selected patches (different from whole slide level i.total).
+    i.count.prob: percentage of nuclei type_i in selected patches.
     i_j.edges.mean: average nuclei distance of type_i <-> type_j interactions.
     i_j.edges.std: nuclei distances std of type_i <-> type_j interactions.
     i_j.edges.count: total No. of type_i <-> type_j interactions in all patches.
@@ -35,98 +50,74 @@ from utils_image import random_sampling_in_polygons, binary_mask_to_polygon, pol
     i_j.edges.conditional.prob: i_j.edges.count/sum(x_j.edges.count), edge probability condition to type_j interaction.
     i_j.edges.dice: dice coefficient of i_x.edges and y_j.edges, overlap over union of type_i interaction and type_j interaction.
 
-    2. Continuous features (density based): use kernel smoothing to transfer nuclei into density map.
+    3. Density based features: use kernel smoothing to transfer nuclei into density map.
     i_j.dot: dot product between type_i and type_j.
     i.norm: norm2(type_i), type_i density.
     i_j.proj: i_j.dot / j.norm, influence of type_i on type_j.
+    i_j.proj.logit: log scale of i_j.proj, make support for add/minus between features. 
+    i_j.proj.prob: use sigmoid activation to transfer i_j.proj.logit into probability score (0~1).
     i_j.cos: i_j.dot/i.norm/j.norm, similarity of type_i and type_j.
 """
 
-OBJECT_FEATURES = ['coordinate_x', 'coordinate_y', 'cell_type', 'probability']
-REGIONPROP_FEATURES = [
-    'area', 'convex_area', 'eccentricity', 'extent',
-    'filled_area', 'major_axis_length', 'minor_axis_length',
-    'orientation', 'perimeter', 'solidity',
-]
-ADDITIONAL_FEATURES = {
-    'pa_ratio': lambda prop, kwargs: 1.0 * prop.perimeter ** 2 / prop.filled_area, 
-    'n_contour': lambda prop, kwargs: kwargs['n_contour'],
+TO_REMOVE = 1
+# OBJECT_FEATURES = ['coordinate_x', 'coordinate_y', 'cell_type', 'probability']
+REGIONPROP_FEATURES = {
+    'area': lambda prop: prop.area, 
+    'convex_area': lambda prop: prop.convex_area, 
+    'eccentricity': lambda prop: prop.eccentricity, 
+    'extent': lambda prop: prop.extent,
+    'filled_area': lambda prop: prop.filled_area, 
+    'major_axis_length': lambda prop: prop.major_axis_length, 
+    'minor_axis_length': lambda prop: prop.minor_axis_length,
+    'orientation': lambda prop: prop.orientation, 
+    'perimeter': lambda prop: prop.perimeter, 
+    'solidity': lambda prop: prop.solidity,
+    'pa_ratio': lambda prop: 1.0 * prop.perimeter ** 2 / prop.filled_area, 
 }
 
 
-def res2map_yolo_result(x, slide_size=None, n_classes=None, use_scores=False, scale=1.0, drop_duplicates=False):
-    ## torch.Tensor: x0, y0, x1, y1, scores, class_ids
-    n_classes = n_classes or int(x[:,5].max().item())
-    # remove unused/unclassified labels
-    x = x[(x[:,5] <= n_classes) & (x[:,5]  >= 0)]
+def filter_wsi_results(x, n_classes=None, **kwargs):
+    """ Remove unused/unclassified labels, drop low scores and remove occlusion. """
+    score_threshold = kwargs.get('score_threshold', 0.)
+    iou_threshold = kwargs.get('iou_threshold', 1.)
+    n_classes = n_classes or int(x['labels'].max().item())
 
-    if scale != 1.0:
-        x[:,:4] *= scale
-        if slide_size is None:
-            h, w = int(math.ceil(x[:,[1,3]].max().item())+1), int(math.ceil(x[:,[0,2]].max().item())+1)
-        else:
-            h, w = int(math.ceil(slide_size[0] * scale)), int(math.ceil(slide_size[1] * scale))
+    keep = (x['labels'] <= n_classes) & (x['labels'] >= 0)
+    x = {k: v[keep] for k, v in x.items()}
+    if score_threshold > 0.:
+        keep = x['scores'] >= score_threshold
+        x = {k: v[keep] for k, v in x.items()}
+    if iou_threshold < 1.:
+        keep = torchvision.ops.nms(x['boxes'], x['scores'], iou_threshold=iou_threshold)
+        x = {k: v[keep] for k, v in x.items()}
+    
+    return x
+
+
+def generate_nuclei_map(x, slide_size=None, n_classes=None, use_scores=False):
+    n_classes = n_classes or int(x['labels'].max().item())
+    if slide_size is None:
+        h, w = int(math.ceil(x['boxes'][:,[1,3]].max().item())+1), int(math.ceil(x['boxes'][:,[0,2]].max().item())+1)
+    else:
+        h, w = slide_size
 
     # calculate average size for each class
-    d = ((x[:,3]-x[:,1]) * (x[:,2]-x[:,0])) ** 0.5
+    d = ((x['boxes'][:,3]-x['boxes'][:,1]) * (x['boxes'][:,2]-x['boxes'][:,0])) ** 0.5
     r_ave = {}
     for _ in range(n_classes): # 0.median() gives segmentation fault...
-        tmp = d[x[:, 5] == _+1]
+        tmp = d[x['labels'] == _+1]
         r_ave[_] = tmp.median().item()/2 if len(tmp) else np.nan
 
     # get coordinates
-    i_c = x[:, 5] - 1
-    i_x = ((x[:,1] + x[:,3])/2).round()
-    i_y = ((x[:,0] + x[:,2])/2).round()
-    val = x[:,4]
-
-    # drop duplicated detections
-    if drop_duplicates:
-        keep = torchvision.ops.nms(torch.stack([i_x, i_y, i_x+2, i_y+2], -1), val, iou_threshold=0.5)
-        i_c, i_x, i_y, val = i_c[keep], i_x[keep], i_y[keep], val[keep]
+    i_c = x['labels'] - 1
+    i_x = ((x['boxes'][:,1] + x['boxes'][:,3])/2).round()
+    i_y = ((x['boxes'][:,0] + x['boxes'][:,2])/2).round()
+    val = x['scores']
     # build point clouds
     pts = torch.sparse_coo_tensor([i_c.tolist(), i_x.tolist(), i_y.tolist()], 
                                   (val if use_scores else [1.0] * len(val)), 
                                   (n_classes, h, w)).coalesce()
 
-    return pts, r_ave
-
-
-def res2map_shidan_result(x, n_classes=None, use_scores=False):
-    # Dataframe: 
-    # coordinate_x, coordinate_y, cell_type, probability, 
-    # area, convex_area, eccentricity, extent, filled_area, 
-    # major_axis_length, minor_axis_length, orientation, perimeter, solidity, pa_ratio, n_contour
-    
-    # remove unused labels
-    if n_classes is not None:
-        x = x[x['cell_type'] <= n_classes]
-    else:
-        n_classes = int(x['cell_type'].max())
-    # x[:, 5] -= 1  # remove 1 from label
-
-    # calculate average size for each class
-    d = 2 * (x['filled_area']/math.pi) ** 0.5
-    r_ave = {}
-    for _ in range(n_classes): # 0.median() gives segmentation fault...
-        tmp = d[x['cell_type'] == _+1]
-        r_ave[_] = tmp.median()/2 if len(tmp) else np.nan
-
-    # get coordinates
-    i_c = x['cell_type'] - 1
-    i_x = x['coordinate_x'].round()
-    i_y = x['coordinate_y'].round()
-    val = x['probability']
-    h, w = int(math.ceil(x['coordinate_x'].max())+1), int(math.ceil(x['coordinate_y'].max())+1)
-    
-    # remove duplicates, build point clouds
-    # keep = torchvision.ops.nms(torch.stack([i_x, i_y, i_x+2, i_y+2], -1), val, iou_threshold=0.5)
-    # i_c, i_x, i_y, val = i_c[keep].tolist(), i_x[keep].tolist(), i_y[keep].tolist(), val[keep].tolist()
-    # pts = torch.sparse_coo_tensor([i_c, i_x, i_y], (val if use_scores else [1.0] * len(val)), (n_classes, h, w)).coalesce()
-    pts = torch.sparse_coo_tensor([i_c.tolist(), i_x.tolist(), i_y.tolist()], 
-                                  (val if use_scores else [1.0] * len(val)), 
-                                  (n_classes, h, w)).coalesce()
-    
     return pts, r_ave
 
 
@@ -246,32 +237,6 @@ def apply_filters(x, radius, scale_factor=1.0, method='gaussian', grid=4096, dev
     return x_rescale, res
 
 
-def nuclei_features(inputs, **kwargs):
-    """ Extract features from yolov5-mask result.
-        All x, y follow skimage sequence. (opposite to PIL).
-        x: row, height. y: col, width.
-    """
-    r, image_info = inputs
-    roi_slide, roi_patch = image_info
-    y0_s, x0_s, w_s, h_s = roi_slide.numpy()
-    y0_p, x0_p, w_p, h_p = roi_patch.numpy()
-    
-    for idx, (box, label, score) in enumerate(zip(r['boxes'], r['labels'], r['scores'])):
-        y_c, x_c = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
-        if (y_c > y0_p) & (y_c < y0_p + w_p) & (x_c > x0_p) & (x_c < x0_p + h_p):
-            o = [y_c + y0_s, x_c + x0_s, label.item(), score.item()]
-            if 'masks' in r:
-                mask = r['masks'][idx]
-                bw = max(int(box[2] - box[0] + 1), 1)
-                bh = max(int(box[3] - box[1] + 1), 1)
-                mask = F.interpolate((mask[None]), size=(bh, bw), mode='bilinear', align_corners=False)[0][0]
-                prop = ObjectProperties(box.numpy(), mask.numpy())
-                if prop.area > 0:
-                    o += [getattr(prop, _) for _ in REGIONPROP_FEATURES]
-                    o += [f(prop, params) for k, f in ADDITIONAL_FEATURES.items()]
-            yield o
-
-
 def product_features(x):
 #     res = {_: torch.norm(x[_].flatten(), p=2).item() ** 2 for _ in range(len(x))}
 #     for i, j in itertools.combinations(range(len(x)), 2):
@@ -294,7 +259,7 @@ def delaunay_features(coords, labels, min_dist=0., max_dist=np.inf):
     idx_2 = indices[[1,2,0]].flatten()
     pairs = np.array(['{}_{}'.format(*sorted(_)) for _ in zip(labels[idx_1], labels[idx_2])])
     dists = torch.norm((coords[idx_1] - coords[idx_2]), p=2, dim=1).numpy()
-    keep = (dists > min_dist) * (dists < np.inf)
+    keep = (dists > min_dist) * (dists < max_dist)
     
     return pairs[keep].tolist(), dists[keep].tolist()
 
@@ -314,7 +279,6 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
                    nms_threshold=0.3, score_threshold=0.6, sampling_factor=10,
                    seed=None, plot_selection=False):
     # from nms.nms import boxes as nms_boxes
-    
     if isinstance(patch_size, numbers.Number):
         patch_size = (patch_size, patch_size)
     patch_size = np.array(patch_size)
@@ -355,16 +319,52 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
     return patches[keep], indices[keep]
 
 
-def extract_base_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
+def _regionprops(box, label, mask):
+    box = box.round().to(torch.int32)
+    w = max((box[2] - box[0] + TO_REMOVE).item(), 1)
+    h = max((box[3] - box[1] + TO_REMOVE).item(), 1)
+    o = {'box_area': h * w, 'labels': label.item()}
+
+    mask = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR) > 0.5
+    if mask.sum():
+        prop = ObjectProperties(box.numpy(), mask)
+        o.update({k: fn(prop) for k, fn in REGIONPROP_FEATURES.items()})
+    else:
+        o.update({k: np.nan for k, fn in REGIONPROP_FEATURES.items()})
+
+    return o
+
+
+def extract_nuclei_features(x, n_classes=None, num_workers=None, **kwargs):
+    """ Extract features from detection results.
+        All x, y follow skimage sequence. (opposite to PIL).
+        x: row, height. y: col, width.
+    """
+    n_classes = n_classes or int(x['labels'].max().item())
+    if 'masks' not in x:
+        w = (x['boxes'][:,2] - x['boxes'][:,0] + TO_REMOVE)
+        h = (x['boxes'][:,3] - x['boxes'][:,1] + TO_REMOVE)
+        return {'box_area': (h * w).numpy(), 'label': x['labels'].numpy()}
+    else:
+        # we need a way to vectorize this, pool.starmap is super slow
+        df = [_regionprops(box, label, mask)
+              for box, label, mask in zip(x['boxes'], x['labels'], x['masks'])]
+#         with mp.Pool(num_workers) as pool:
+#             df = pool.starmap(_regionprops, zip(x['boxes'], x['labels'], x['masks']))
+
+        return pd.DataFrame(df).to_dict(orient='list')
+
+
+def extract_tme_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
                           n_patches=10, patch_size=2048, nms_thresh=0.3, score_thresh=0.8, 
-                          seed=42, device=torch.device('cpu')):
-    """ Extract base features from slides. 
+                          max_dist=100., seed=42, device=torch.device('cpu')):
+    """ Extract TME features from slides. 
         nuclei_map is a sparse matrix, radius is a dictionary records {type_idx: type_r}, 
         remove type_idx from radius if this class doesn't exists or doesn't want to be used 
         in feature extraction (Note that: removing categories will change the denularity graph 
         and may influence results. Exp: a tumor region full with lots of necrosis or blood cell.)
-        (All base features in this function are addable/concatable if merging is needed.
-         Merge these base features before compute addon features. See compute_normalized_features. )
+        (All TME features in this function are addable/concatable if merging is needed.
+         Merge these TME features before compute addon features. See compute_normalized_features. )
     """
     ## Apply kernel density, cloud_d will only keep type_idx exists in radius
     _, cloud_d = apply_filters(nuclei_map, radius, scale_factor=scale_factor, 
@@ -413,7 +413,7 @@ def extract_base_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
 
         k_patch = 0
         for x0, y0, w, h in patches:
-            if k_patch == 10:
+            if k_patch == n_patches:
                 break
             keep = (coords[:,0] >= y0) & (coords[:,1] >= x0) & (coords[:,0] < y0+w) & (coords[:,1] < x0+h)
             coords_patch, labels_patch = coords[keep], labels[keep]
@@ -425,7 +425,7 @@ def extract_base_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
             else:
                 print(f"Analyzed patch: [{x0}, {y0}, {x0+h}, {y0+w}], with {core_nuclei.sum()} tumor inside.")
 
-            pairs_patch, dists_patch = delaunay_features(coords_patch, labels_patch, max_dist=1000.)
+            pairs_patch, dists_patch = delaunay_features(coords_patch, labels_patch, max_dist=max_dist)
             k_patch += 1
             delaunay['pairs'].extend(pairs_patch)
             delaunay['dists'].extend(dists_patch)
@@ -433,14 +433,14 @@ def extract_base_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
         print(f"Analyzed {k_patch} randomly selected patches (size={patch_size}).")
     else:
         print(f"Warning: can't find valid polygons (>=0.05*roi_area) in masks. ")
-    
+
     cell_counts = Counter(cellinfo['counts'])
     cellinfo_f = {f'{k}.count': cell_counts.get(k, 0) for k in radius}
     
     return {'roi_area': sum(poly_areas), **nuclei_radius, **cellinfo_f, **dot_product, **delaunay,}, cloud_d, masks
 
 
-def merge_base_features_by_ids(x, slide_pat_map=None):
+def merge_tme_features_by_ids(x, slide_pat_map=None):
     """ Add (numbers) or Concat (lists) for dictionary. 
         slide_pat_map={'slide_id' : 'merged_pat_id'}
     """
@@ -480,21 +480,32 @@ def name_converter(x, rep):
 
 
 def summarize_normalized_features(x, slide_pat_map=None):
-    """ Run extract_base_features first,
+    """ Run extract_tme_features first,
         Then run this command to generate normalized features:
         probility, dice, iou, projection, cosine similarity etc.
         If slides need to be merged together based on patient id,
         provide a dictionary: slide_pat_map {slide_id: pat_id}, script will add/concat 
-        all the slots from the results in extract_base_features, then normalize features. 
+        all the slots from the results in extract_tme_features, then normalize features. 
     Args: 
-        x (dict): slide_id/pat_id -> base_features
+        x (dict): slide_id/pat_id -> tme_features
     """
     ## Merge slides if necessary
-    x = merge_base_features_by_ids(x, slide_pat_map)
+    x = merge_tme_features_by_ids(x, slide_pat_map)
     
     ## Calculate mean, std, count for edges, merge all features into dataframe
     df = {}
     for slide_id, entry in x.items():
+        nuclei_fnames = ['box_area'] + [k for k in REGIONPROP_FEATURES if k in entry]
+        nuclei = pd.DataFrame.from_dict({k: entry[k] for k in ['labels'] + nuclei_fnames}, orient='columns')
+        nuclei_f = nuclei.groupby('labels').agg(['mean', 'std'])
+        nuclei_f.columns = [f'{k}.{tag}' for k, tag in nuclei_f.columns]
+        nuclei_f = nuclei_f.stack()
+        nuclei_f.index = [f'{k}.{v}' for k, v in nuclei_f.index]
+        nuclei_f = {
+            **{f'{k}.total': v for k, v in Counter(nuclei['labels']).items()},
+            **nuclei_f.to_dict(),
+        }
+
         if 'pairs' in entry and 'dists' in entry:
             edges = pd.DataFrame.from_dict({'pairs': entry['pairs'], 'dists': entry['dists']}, orient='columns')
             edges_f = edges.groupby('pairs').agg(['mean', 'std', 'count'])['dists']
@@ -509,12 +520,16 @@ def summarize_normalized_features(x, slide_pat_map=None):
             edges_f[f'{i}_{j}.edges.mean'] = edges_f.get(f'{i}_{j}.edges.mean', np.nan)
             edges_f[f'{i}_{j}.edges.std'] = edges_f.get(f'{i}_{j}.edges.std', np.nan)
             edges_f[f'{i}_{j}.edges.count'] = edges_f.get(f'{i}_{j}.edges.count', 0.)
+
         # df[slide_id] = {'id': slide_id, **edges_f, **{k: v for k, v in entry.items() if isinstance(v, numbers.Number)},}
-        df[slide_id] = {'id': slide_id, **edges_f, **{k: v for k, v in entry.items() if k not in ['pairs', 'dists']},}
-    
+        df[slide_id] = {
+            'id': slide_id, **nuclei_f, **edges_f, 
+            **{k: v for k, v in entry.items() if isinstance(v, numbers.Number)},
+        }
+
     df = pd.DataFrame.from_dict(df, orient='index').set_index('id')  # from_dict will ignore empty entry...
     class_ids = sorted([int(_.split('.')[0]) for _ in df.columns if _.endswith('.radius')])
-    
+
     ## Continuous features:
     sigmoid = lambda x: 1 / (1 + np.exp(-x))  # sigmoid function to normalize logit
     # norm: 
@@ -543,12 +558,12 @@ def summarize_normalized_features(x, slide_pat_map=None):
     total_edges = df[[f'{i}_{j}.edges.count' for i, j in itertools.combinations_with_replacement(class_ids, 2)]].sum(1)
     for i, j in itertools.combinations_with_replacement(class_ids, 2):
         df[f'{i}_{j}.edges.marginal.prob'] = df[f'{i}_{j}.edges.count'] / total_edges
-    
+
     # edge conditional probabilities: edge_i_j.count/total_edge_j.count
     for i, j in itertools.permutations(class_ids, 2):
         total_edges_j = df[[f'{min(_, j)}_{max(_, j)}.edges.count' for _ in class_ids]].sum(1)
         df[f'{i}_{j}.edges.conditional.prob'] = df[f'{min(i, j)}_{max(i, j)}.edges.count']/total_edges_j
-    
+
     # dice-coefficient: 2*edge_i_j.count/(total_edge_i.count + total_edge_j.count)
     for i, j in itertools.combinations(class_ids, 2):
         total_edges_i = df[[f'{min(_, i)}_{max(_, i)}.edges.count' for _ in class_ids]].sum(1)
@@ -648,4 +663,41 @@ def mst_euclidean(x):
 
     plt.show()
 
+
+def res2map_shidan_result(x, n_classes=None, use_scores=False):
+    # Dataframe: 
+    # coordinate_x, coordinate_y, cell_type, probability, 
+    # area, convex_area, eccentricity, extent, filled_area, 
+    # major_axis_length, minor_axis_length, orientation, perimeter, solidity, pa_ratio, n_contour
+    
+    # remove unused labels
+    if n_classes is not None:
+        x = x[x['cell_type'] <= n_classes]
+    else:
+        n_classes = int(x['cell_type'].max())
+    # x[:, 5] -= 1  # remove 1 from label
+
+    # calculate average size for each class
+    d = 2 * (x['filled_area']/math.pi) ** 0.5
+    r_ave = {}
+    for _ in range(n_classes): # 0.median() gives segmentation fault...
+        tmp = d[x['cell_type'] == _+1]
+        r_ave[_] = tmp.median()/2 if len(tmp) else np.nan
+
+    # get coordinates
+    i_c = x['cell_type'] - 1
+    i_x = x['coordinate_x'].round()
+    i_y = x['coordinate_y'].round()
+    val = x['probability']
+    h, w = int(math.ceil(x['coordinate_x'].max())+1), int(math.ceil(x['coordinate_y'].max())+1)
+    
+    # remove duplicates, build point clouds
+    # keep = torchvision.ops.nms(torch.stack([i_x, i_y, i_x+2, i_y+2], -1), val, iou_threshold=0.5)
+    # i_c, i_x, i_y, val = i_c[keep].tolist(), i_x[keep].tolist(), i_y[keep].tolist(), val[keep].tolist()
+    # pts = torch.sparse_coo_tensor([i_c, i_x, i_y], (val if use_scores else [1.0] * len(val)), (n_classes, h, w)).coalesce()
+    pts = torch.sparse_coo_tensor([i_c.tolist(), i_x.tolist(), i_y.tolist()], 
+                                  (val if use_scores else [1.0] * len(val)), 
+                                  (n_classes, h, w)).coalesce()
+    
+    return pts, r_ave
 

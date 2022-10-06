@@ -2634,7 +2634,7 @@ class Slide(object):
             indices = [x for _, x in sorted(zip(ious, indices), reverse=True)]
         return np.array(patches), polygons, indices
     
-    def random_patches(self, N, patch_size, image_size=0, masks=".*", 
+    def random_patches(self, N, patch_size, image_size=0, scores_fn=None, masks=".*", 
                        nms_threshold=0.3, coverage_threshold=0.6, sampling_factor=10,
                        seed=None, plot_selection=False):
         """ Randomly select patches from slides for each given pattern.
@@ -2655,6 +2655,7 @@ class Slide(object):
                 masks=img > 0: select from a given binary mask. call 
                                self.roughly_extract_tissue_region(level) for a rough mask for roi.
             image_size: the level or image size, default use the dimension of the highest resolution level.
+            scores_fn: a customized function to determine scores, default calculate IoU(patch, masks)
             nms_threshold: maximum nms threshold between patches. Lower value give low tolerance on overlapping.
                 Note that for small ROI with large N and patch_size, algorithm will tend to select patches 
                 around the border to avoid overlapping.
@@ -2697,22 +2698,26 @@ class Slide(object):
         patches = np.hstack([coords.astype(np.int), np.tile(patch_size, (pool_size, 1))])
         
         ## generate mask and calculate iou (project on low resolution to save time)
-        level_idx = self.get_resize_level((1024, 1024))
-        masks = self.polygons2mask(polygons, shape=self.level_dims[level_idx], scale=1./scales[level_idx])
-        ious = np.array([np.sum(masks[y0:y0+dh, x0:x0+dw])/dw/dh 
-                         for x0, y0, dw, dh in (patches / np.tile(scales[-1], 2)).astype(np.int)])
-        ## use output resolution (slow)
-        # masks = self.polygons2mask(polygons, shape=(w, h), scale=1.)
-        # ious = np.array([np.sum(masks[y0:y0+dh, x0:x0+dw])/dw/dh for x0, y0, dw, dh in patches])
-        
-#         from nms.nms import boxes as nms_boxes
-#         cutoff = ious >= coverage_threshold
-#         patches, ious, indices = patches[cutoff], ious[cutoff], indices[cutoff]
-#         keep = nms_boxes(patches, ious, nms_threshold=nms_threshold, eta=0.9, top_k=N)
+
+        if scores_fn is None:  # use mask_region/patch_size as score
+            level_idx = self.get_resize_level((1024, 1024))
+            masks = self.polygons2mask(polygons, shape=self.level_dims[level_idx], scale=1./scales[level_idx])
+            scores = np.array([np.sum(masks[y0:y0+dh, x0:x0+dw])/dw/dh 
+                               for x0, y0, dw, dh in (patches / np.tile(scales[level_idx], 2)).astype(np.int)])
+        else:
+            scores = np.array([scores_fn(_) for _ in patches.astype(np.int)])
+
         # cv2 may cause segmentation fault...
-        keep = cv2.dnn.NMSBoxes(patches, ious, score_threshold=coverage_threshold, 
+        keep = cv2.dnn.NMSBoxes(patches, scores, score_threshold=coverage_threshold, 
                                 nms_threshold=nms_threshold, eta=0.9, top_k=N)
+        keep = keep if len(keep) else []  # cv2 gives: keep = () for empty, but patches[()] is everything.
         
+#         cutoff = scores >= score_threshold
+#         patches, scores, indices = patches[cutoff], scores[cutoff], indices[cutoff]
+#         patches = torch.from_numpy(patches).type(torch.float32)
+#         scores = torch.from_numpy(scores).type(torch.float32)
+#         keep = torchvision.ops.nms(patches, scores, nms_threshold)[:N]
+
         return patches[keep], polygons, indices[keep]
     
     def plot_sampling(self, x, window=None, image_size=0, figsize=(24, 24)):
