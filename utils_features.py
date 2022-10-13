@@ -17,13 +17,14 @@ from functools import reduce
 from collections import Counter
 from scipy.signal import fftconvolve, convolve
 
+import matplotlib
 import skimage.morphology
 
 from utils_image import random_sampling_in_polygons, binary_mask_to_polygon, polygon_areas, ObjectProperties
 
 #
 """ Nuclei feature codes:
-    1. Nuclei features.
+    1. Nuclei morphological features.
     roi_area: overall tumor/tissue region.
     i.radius: average radius for nuclei type_i base on bounding bx size.
     i.total: total amount of nuclei type_i detected in results file.
@@ -124,7 +125,7 @@ def generate_nuclei_map(x, slide_size=None, n_classes=None, use_scores=False):
 def rescale_nuclei_map(x, radius, scale_factor=1.0, grid=4096):
     if scale_factor == 1.0:  # no rescale, to_dense()
         return x.to_dense()[list(radius.keys())]
-    
+
     n_classes, h0, w0 = x.shape
     h, w = (round(h0*scale_factor), round(w0*scale_factor))
     if h0 < grid and w0 < grid:  # for small slide: h, w < grid
@@ -155,35 +156,30 @@ def rescale_nuclei_map(x, radius, scale_factor=1.0, grid=4096):
         return patches[:, :h, :w]
 
 
-def scatter_plot_large_memory(nuclei_map, r_ave, scale_factor=1./64):
-    pts = nuclei_map.to_dense()[[1, 0, 2]]
-    pts[:, pts.sum(0) != 0] -= 1  # invert color to get white background
-    pts_image = rescale_nuclei_map(-pts.to_sparse(), r_ave, scale_factor=scale_factor, grid=4096)
-    p_image = 1 - (pts_image.permute(1, 2, 0).numpy() > 0) * 1.0
-    
-    return p_image
-
-
-def scatter_plot(nuclei_map, r_ave, scale_factor=1./64):
+def scatter_plot(nuclei_map, r_ave, labels_color, scale_factor=1./64):
     nc, h, w = nuclei_map.shape
-    coords = nuclei_map.indices()
+    c, x, y = nuclei_map.indices()
     values = nuclei_map.values()
-    keep = coords[0] < 3
-    coords = coords[:, keep]
-    values = values[keep]
-    c, x, y = coords
-    c = (1 - c) % 3 #1->0,0->1,2->2
 
-    i_c = torch.cat([(c + 1) % 3, (c + 2) % 3])
-    i_x = torch.cat([x, x])
-    i_y = torch.cat([y, y])
-    val = torch.cat([values, values])
+    # color tensor
+    color_tensor = torch.zeros((nc + 1 + 1, 4), dtype=torch.float32)
+    for k, v in labels_color.items():
+        if k > 0 and k <= nc:
+            color_tensor[k] = torch.tensor(matplotlib.colors.to_rgba(v))
+        else:
+            color_tensor[-1] = torch.tensor(matplotlib.colors.to_rgba(v))
+
+    i_c = torch.tensor([0,1,2,3]).repeat(len(c))
+    i_x = x.repeat_interleave(4)
+    i_y = y.repeat_interleave(4)
+    val = F.embedding(c+1, color_tensor).flatten()  # c start from 0, labels_color start with 1
 
     new_pts = torch.sparse_coo_tensor([i_c.tolist(), i_x.tolist(), i_y.tolist()], val, 
-                                      (3, h, w)).coalesce()
-
-    pts_image = rescale_nuclei_map(new_pts, r_ave, scale_factor=scale_factor, grid=4096)
-    p_image = 1 - (pts_image.permute(1, 2, 0).numpy() > 0) * 1.0
+                                      (4, h, w)).coalesce()
+    r_rgb = torch.stack([color_tensor[k+1] * v for k, v in r_ave.items()]).numpy()
+    r_rgb = {k: v for k, v in enumerate(np.nanmax(r_rgb, 0))}
+    pts_image = rescale_nuclei_map(new_pts, r_rgb, scale_factor=scale_factor, grid=4096)
+    p_image = (pts_image.permute(1, 2, 0).numpy() > 0) * 1.0
     
     return p_image
 
@@ -289,7 +285,7 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
         w, h = image_size
     
     pool_size = N * sampling_factor
-    coords, indices = random_sampling_in_polygons(polygons, pool_size, plot=True, seed=seed)
+    coords, indices = random_sampling_in_polygons(polygons, pool_size, plot=plot_selection, seed=seed)
     coords = coords - patch_size / 2 + np.random.uniform(-0.5, 0.5, size=(pool_size, 2)) * patch_size
     ## shift bboxes at corner and border into valid region, flip x and y to match cv2 functions
     coords[:,0] = np.clip(coords[:,0], 0, w - patch_size[0])
@@ -571,133 +567,3 @@ def summarize_normalized_features(x, slide_pat_map=None):
         df[f'{i}_{j}.edges.dice'] = 2 * df[f'{i}_{j}.edges.count']/(total_edges_i + total_edges_j)
 
     return df
-
-
-################################
-def load_coords(filename):
-    coord = pd.read_csv(filename)
-    # Get row, col indices
-    row = (2 * coord.ix[:,1].values).astype(np.int)
-    col = (2 * coord.ix[:,2].values).astype(np.int)
-    row, col = row - row.min() + 1, col - col.min() + 1
-    # image_shape: 3000*3000 or 2500*2500
-    grid = 500
-    h = w = math.ceil(max(row.max() - row.min() + 1, col.max() - col.min() + 1)/grid)*grid
-
-    # Change (1: lymphocytes -> blue, 2: stroma -> red, 3: tumor cells -> green)
-    # to (0: stroma -> red, 1: tumor cells -> green, 2: lymphocytes -> blue)
-    val = (coord.ix[:,3].values.astype(np.int) - 2) % 3
-    # image = coo_matrix((val + 1, (row, col)), shape=(h, w)).toarray()
-    image = np.zeros((h, w, 3))
-    for i, j, k in zip(row, col, val):
-        image[i, j, k] = 1.0
-    image_c = np.stack([skimage.morphology.dilation(image[:,:,i], skimage.morphology.disk(6)) for i in range(3)], axis=-1)
-    return image, image_c
-
-
-def interaction_map(image, kernel=None, method='gaussian', radius=4, **kwargs):
-    if kernel is None:
-        ksize = 2 * radius + 1
-        if method == 'gaussian':
-            # sigma = 0 for default sigma (sigma = 0.3*((ksize-1)*0.5 - 1) + 0.8)
-            if 'sigmaX' not in kwargs:
-                kwargs['sigmaX'] = 0
-            res = cv2.GaussianBlur(image, (ksize, ksize), **kwargs)
-        elif method == 'mean':
-            res = cv2.blur(image, (ksize, ksize))
-        elif method == 'bilateral':
-            if 'd' not in kwargs:
-                kwargs['d'] = 9
-            res = cv2.bilateralFilter(image, **kwargs)
-    else:
-        res = cv2.filter2D(image, -1, kernel)
-    res[res < 1e-16] = 0
-
-    # print("Interaction_map: " + str([res.max(), res.min(), res.shape]))
-    # plt.imshow(skimage.exposure.rescale_intensity(res, out_range=(0, 1)))
-    # plt.show()
-
-    return res
-
-
-def weighted_pixelwise_entropy(image, use_weight=True):
-    total = np.sum(image, axis=-1, keepdims=True)
-    areas = [np.sum(total > 0)/total.size] + [np.sum(image[:,:,i] > 0)/total.size for i in range(image.shape[-1])]
-    entropy = np.sum(np.where(image > 0, -image/total*np.log(image/total), 0.0), axis=-1)
-    if use_weight:
-        entropy = entropy * np.squeeze(total, axis=-1)
-    return np.mean(entropy), entropy, areas
-
-
-def mst_euclidean(x):
-    coords = np.transpose(np.stack([np.random.uniform(-10, 10, size=100), np.random.uniform(-10, 10, size=100)]))
-    tri = scipy.spatial.Delaunay(coords)
-    indices, indptr = tri.vertex_neighbor_vertices
-    def d(p1, p2, coords):
-        return scipy.spatial.distance.euclidean(coords[p1], coords[p2])
-
-    edges = dict()
-    for p1, p2, p3 in tri.simplices:
-        edges[frozenset([p1, p2])] = d(p1, p2, coords)
-        edges[frozenset([p1, p3])] = d(p1, p3, coords)
-        edges[frozenset([p2, p3])] = d(p2, p3, coords)
-
-    edges = sorted(edges.items(), key=lambda x: x[1])
-    point_labels = dict([(i, set([i]))for i in range(len(coords))])
-
-    res = []
-    for edge, d in edges:
-        p1, p2 = list(edge)
-        if point_labels[p1] != point_labels[p2]:
-            res.append((p1, p2))
-            merge = point_labels[p1] | point_labels[p2]
-            for x in merge:
-                point_labels[x] = merge
-
-    ## Plot result:
-    plt.plot(coords[:,0], coords[:,1], 'p')
-    plt.show()
-    for p1, p2 in res:
-        p = coords[[p1, p2]]
-        plt.plot(p[:,0], p[:,1], 'ro-')
-
-    plt.show()
-
-
-def res2map_shidan_result(x, n_classes=None, use_scores=False):
-    # Dataframe: 
-    # coordinate_x, coordinate_y, cell_type, probability, 
-    # area, convex_area, eccentricity, extent, filled_area, 
-    # major_axis_length, minor_axis_length, orientation, perimeter, solidity, pa_ratio, n_contour
-    
-    # remove unused labels
-    if n_classes is not None:
-        x = x[x['cell_type'] <= n_classes]
-    else:
-        n_classes = int(x['cell_type'].max())
-    # x[:, 5] -= 1  # remove 1 from label
-
-    # calculate average size for each class
-    d = 2 * (x['filled_area']/math.pi) ** 0.5
-    r_ave = {}
-    for _ in range(n_classes): # 0.median() gives segmentation fault...
-        tmp = d[x['cell_type'] == _+1]
-        r_ave[_] = tmp.median()/2 if len(tmp) else np.nan
-
-    # get coordinates
-    i_c = x['cell_type'] - 1
-    i_x = x['coordinate_x'].round()
-    i_y = x['coordinate_y'].round()
-    val = x['probability']
-    h, w = int(math.ceil(x['coordinate_x'].max())+1), int(math.ceil(x['coordinate_y'].max())+1)
-    
-    # remove duplicates, build point clouds
-    # keep = torchvision.ops.nms(torch.stack([i_x, i_y, i_x+2, i_y+2], -1), val, iou_threshold=0.5)
-    # i_c, i_x, i_y, val = i_c[keep].tolist(), i_x[keep].tolist(), i_y[keep].tolist(), val[keep].tolist()
-    # pts = torch.sparse_coo_tensor([i_c, i_x, i_y], (val if use_scores else [1.0] * len(val)), (n_classes, h, w)).coalesce()
-    pts = torch.sparse_coo_tensor([i_c.tolist(), i_x.tolist(), i_y.tolist()], 
-                                  (val if use_scores else [1.0] * len(val)), 
-                                  (n_classes, h, w)).coalesce()
-    
-    return pts, r_ave
-

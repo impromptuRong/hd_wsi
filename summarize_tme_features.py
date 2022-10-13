@@ -101,7 +101,10 @@ def main(args):
             print(nuclei_map.shape, r_ave)
 
             ## Extract TME features
-            scatter_img = scatter_plot(nuclei_map, r_ave, scale_factor=1./args.scale_factor)
+            scatter_img = scatter_plot(nuclei_map, r_ave, 
+                                       labels_color=meta_info['labels_color'], 
+                                       scale_factor=1./args.scale_factor
+                                      )
             tme_features, cloud_d, roi_mask = extract_tme_features(
                 nuclei_map, r_ave, 
                 scale_factor=1./args.scale_factor, 
