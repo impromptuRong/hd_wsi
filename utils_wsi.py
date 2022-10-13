@@ -109,7 +109,7 @@ class WholeSlideDataset(torch.utils.data.Dataset):
         else:
             self.scale = 1.0
             self.window_size = self.patch_size
-            self.window_padding = self.window_padding
+            self.window_padding = self.padding
 
         # st = time.time()
         if isinstance(masks, str):

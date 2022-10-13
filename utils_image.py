@@ -2351,13 +2351,13 @@ class Slide(object):
                 self.description = slide.pages[0].description
                 
                 # magnification
-                val = re.findall(r'\|AppMag = (?P<mag>[\d.]+)\|', self.description)
+                val = re.findall(r'\|AppMag = (?P<mag>[\d.]+)', self.description)
                 self.magnitude = float(val[0]) if val else None
                 if verbose and self.magnitude is None:
                     print(f"Didn't find magnitude in description.")
                 
                 # mpp
-                val = re.findall(r'\|MPP = (?P<mag>[\d.]+)\|', self.description)
+                val = re.findall(r'\|MPP = (?P<mag>[\d.]+)', self.description)
                 self.mpp = float(val[0]) if val else None
                 if verbose and self.mpp is None:
                     print(f"Didn't find mpp in description.")
