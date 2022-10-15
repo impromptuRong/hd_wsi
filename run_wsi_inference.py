@@ -36,6 +36,7 @@ def analyze_one_slide(model, dataset,
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, 
         num_workers=n_workers, shuffle=False,
+        pin_memory=True,
     )
 
     model.eval()
@@ -77,8 +78,12 @@ def main(args):
         print("==============================")
         if not os.path.exists(res_file):
             t0 = time.time()
-            dataset = WholeSlideDataset(svs_file, masks=args.roi, processor=None, **dataset_configs)
-            print(dataset.info())
+            try:
+                dataset = WholeSlideDataset(svs_file, masks=args.roi, processor=None, **dataset_configs)
+                print(dataset.info())
+            except:
+                print(f"Failed to load slide {svs_file}")
+                continue
             outputs = analyze_one_slide(model, dataset,  
                                         compute_masks=not args.box_only,
                                         batch_size=args.batch_size, 

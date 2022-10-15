@@ -132,7 +132,7 @@ class WholeSlideDataset(torch.utils.data.Dataset):
         self.patches, self.polygons, self.poly_indices = self.slide.whole_slide_scanner(
             self.window_size, self.page, masks=self.masks, coverage_threshold=0.,
         )
-        pars = self.slide.pad_roi(self.patches, self.patch_size, self.page, padding=self.window_padding)
+        pars = self.slide.pad_roi(self.patches, self.window_size, self.page, padding=self.window_padding)
         pars += (self.poly_indices,)
         
         self.images = []
@@ -297,7 +297,7 @@ def yolov5_inference(model, data_loader, input_size=640, compute_masks=True, dev
                     o = pred['det']  # yolo_mask model, multi-task
                 else:
                     o = pred  # maskrcnn model
-
+                
                 if score_threshold > 0.:
                     keep = o['scores'] >= score_threshold
                     o = {k: v[keep] for k, v in o.items()}
