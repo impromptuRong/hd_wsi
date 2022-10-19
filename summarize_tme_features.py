@@ -75,7 +75,8 @@ def main(args):
 
             ## Extract nuclei features
             nuclei_features = extract_nuclei_features(
-                res_nuclei, n_classes=args.n_classes, num_workers=args.num_workers,
+                res_nuclei, box_only=args.box_only, 
+                n_classes=args.n_classes, num_workers=args.num_workers,
             )
             if args.save_nuclei:
                 output_df = {
@@ -196,7 +197,8 @@ if __name__ == '__main__':
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, 
                         help='Run density analysis on cpu or gpu.')
     parser.add_argument('--num_workers', default=None, type=int, help='Number of workers for density data loader.')
-    parser.add_argument('--save_nuclei', action='store_true', help='Store nuclei morphological information into a csv file.')
+    parser.add_argument('--box_only', action='store_true', help='Ignore nuclei mask morphological features.')
+    parser.add_argument('--save_nuclei', action='store_true', help='Store nuclei morphological features into a csv file.')
     parser.add_argument('--save_images', action='store_true', help='Store img, dots, densities, roi masks.')
     
     args = parser.parse_args()

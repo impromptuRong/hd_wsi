@@ -11,7 +11,16 @@ DATA_PATH = os.path.join(
     "/archive/DPDS/Xiao_lab/shared/hudanyun_sheng/pathology_image_data",
     "TCGA_BRCA/slides/TCGA-Breast Cancer",
 )
-MODEL_PATH = "./selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt"
+
+DEFAULT_MODEL_PATH = {
+    'lung': './selected_models/benchmark_lung/lung_best.float16.torchscript.pt',
+    'brca': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
+    'nucls1': './selected_models/benchmark_nucls_paper/fold1_epoch6.float16.torchscript.pt',
+    'nucls2': './selected_models/benchmark_nucls_paper/fold2_epoch71.float16.torchscript.pt',
+    'nucls3': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
+    'nucls4': './selected_models/benchmark_nucls_paper/fold4_epoch102.float16.torchscript.pt',
+    'nucls5': './selected_models/benchmark_nucls_paper/fold5_epoch127.float16.torchscript.pt',
+}
 
 # nms_params = {
 #     'conf_thres': 0.15, # score_threshold, discards boxes with score < score_threshold
@@ -41,6 +50,7 @@ def analyze_one_slide(model, dataset,
 
     model.eval()
     t0 = time.time()
+    print(f"Inferencing: ", end="")
     res = yolov5_inference(
         model, data_loader, 
         input_size=input_size,
@@ -48,12 +58,14 @@ def analyze_one_slide(model, dataset,
         device=device, **nms_params,
     )
     t1 = time.time()
-    print(f"Inference time: {t1-t0} s")
+    print(f"{t1-t0} s")
 
     return {'cell_stats': res, 'inference_time': t1-t0}
 
 
 def main(args):
+    if args.model_path in DEFAULT_MODEL_PATH:
+        args.model_path = DEFAULT_MODEL_PATH[args.model_path]
     model = torch.jit.load(args.model_path)
     device = torch.device(args.device)
     
@@ -152,7 +164,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', required=True, type=str, help="input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="meta info yaml file: contains label texts and colors.")
-    parser.add_argument('--model_path', default=MODEL_PATH, type=str, help="Model path, torch jit model." )
+    parser.add_argument('--model_path', default='brca', type=str, help="Model path, torch jit model." )
     parser.add_argument('--output_dir', default='slide_results', type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--roi', default='tissue', type=str, help='ROI region.')

@@ -6,6 +6,7 @@ classes:
 - blood
 - macrophage
 - dead
+- other
 labels_color:
   -100: '#949494'
   0: '#ffffff'
@@ -15,6 +16,7 @@ labels_color:
   4: '#ff00ff'
   5: '#ffff00'
   6: '#0094e1'
+  7: '#646464'
 labels_text:
   -100: unlabeled
   1: tumor
@@ -23,3 +25,4 @@ labels_text:
   4: blood
   5: macrophage
   6: dead
+  7: other

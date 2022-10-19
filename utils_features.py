@@ -331,13 +331,13 @@ def _regionprops(box, label, mask):
     return o
 
 
-def extract_nuclei_features(x, n_classes=None, num_workers=None, **kwargs):
+def extract_nuclei_features(x, box_only=False, n_classes=None, num_workers=None, **kwargs):
     """ Extract features from detection results.
         All x, y follow skimage sequence. (opposite to PIL).
         x: row, height. y: col, width.
     """
     n_classes = n_classes or int(x['labels'].max().item())
-    if 'masks' not in x:
+    if box_only or 'masks' not in x:
         w = (x['boxes'][:,2] - x['boxes'][:,0] + TO_REMOVE)
         h = (x['boxes'][:,3] - x['boxes'][:,1] + TO_REMOVE)
         return {'box_area': (h * w).numpy(), 'label': x['labels'].numpy()}

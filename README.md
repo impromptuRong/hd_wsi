@@ -46,7 +46,7 @@ conda env create --prefix /path/to/conda/env/ -f z.ml_env2_1.10.1.yaml
 conda activate /path/to/conda/env/
 ```
 
-Step 3. Download pretrained models from BioHPC. 5 pretrained `Yolo_mask` models are provided for breast cancer. Copy them into `hd_wsi` folder or specify your own model. (The default model used in the script is `fold3_epoch201.float16.torchscript.pt`)
+Step 3. Download pretrained models from BioHPC. Pretrained `Yolo_mask` models are provided for lung cancer and breast cancer. Copy them into `hd_wsi` folder or specify your own model. (The default models used in the script are `benchmark_lung/lung_best.float16.torchscript.pt` and `benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt`)
 ```
 cp -r /project/DPDS/Xiao_lab/shared/RuichenRong/Packages/hd_wsi/selected_models/ hd_wsi/
 ```
@@ -55,7 +55,7 @@ When building pipeline with customized model, the pytorch model should be in eva
 
 ## User Guideline
 ### a) Image patch nuclei segmentation
-The script `run_patch_inference.py` analyzes a single image patch or a folder of image patches with given model and outputs nuclei detection and segmentation results. Image patches are analyzed one-by-one without batch parallel, so image patches with different sizes are allowed. By default, model uses breast cancer `Yolo_mask` model for the following nuclei: tumor, stromal, immune, blood, and others. mpp need to be specified with option `--mpp`. The script will automatically align image patch scale to default model scale (mpp=0.25, 40x) during inference and convert result to the original input size. Run `python run_patch_inference.py -h` for all options.
+The script `run_patch_inference.py` analyzes a single image patch or a folder of image patches with given model and outputs nuclei detection and segmentation results. Image patches are analyzed one-by-one without parallel, so image patches with different sizes are allowed. By default, model uses breast cancer `Yolo_mask` model to segment the following nuclei: tumor, stromal, immune, blood, macrophage, necrosis and others. mpp need to be specified with option `--mpp`. The script will automatically align image patch scale to default scale (mpp=0.25, 40x) during inference and convert result to the original input size. Run `python run_patch_inference.py -h` for all options.
 
 Example 1. Produce the result of a 40x lung cancer image patch displayed in the introduction:
 ```
@@ -69,17 +69,17 @@ python run_patch_inference.py --data_path /path/to/patch_folder --output_dir /pa
 
 
 ### b) Whole slide nuclei detection and segmentation
-The script `run_wsi_inference.py` accepts a single slide or a folder of slides as inputs and outputs nuclei detection and segmentation results from given model. By default, model uses breast cancer `Yolo_mask` model for the following nuclei: tumor, stromal, immune, blood, and others. Slides with different magnification and mpp will be aligned to mpp=0.25 (40x) during inference but convert back to the original mpp and scale in results. Run `python run_wsi_inference.py -h` for all options.
+The script `run_wsi_inference.py` accepts a single slide or a folder of slides as inputs and outputs nuclei detection and segmentation results from given model. By default, model uses breast cancer `Yolo_mask` model to detect the following nuclei: tumor, stromal, immune, blood, macrophage, necrosis and others. Slides with different magnification and mpp will be aligned to mpp=0.25 (40x) during inference but convert back to the original mpp and scale in results. Run `python run_wsi_inference.py -h` for all options.
 
 
-Example 1. Quick start with predefined model on the sample slide with default options:
+Example 1. Quick start with pretrained breast cancer model on the sample BRCA slide with default options:
 ```
 CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
 ```
 
-Example 2. Detect only box on cpu with the breast cancer model and export result to csv
+Example 2. Detect only box on cpu with the default lung cancer model and export result to csv
 ```
-python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi_box_only --meta_info meta_info_brca.yaml --device cpu --box_only --save_csv
+python -u run_wsi_inference.py --data_path sample.svs --model_path lung --output_dir test_wsi_box_only --device cpu --box_only --save_csv
 ```
 
 Example 3. Run a large customized RCNN model on a folder of slides with annotations. Export results to image, and save mask and text information into csv file.
