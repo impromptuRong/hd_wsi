@@ -26,15 +26,6 @@ from openslide import open_slide
 
 
 TO_REMOVE = 1
-DATASET_CONFIGS = {
-    'patch_size': 512,
-    'padding': 64,
-    'mpp': 0.25,
-    'page': 0,
-    'labels': ['bg', 'tumor', 'stroma', 'immune'],
-    'labels_color': {'bg': '#ffffff', 'tumor': '#00ff00', 'stroma': '#ff0000', 'immune': '#0000ff'},
-    'labels_text': {0: 'bg', 1: 'tumor', 2: 'stroma', 3: 'immune'},
-}
 
 
 def load_cfg(cfg):
@@ -297,7 +288,7 @@ def yolov5_inference(model, data_loader, input_size=640, compute_masks=True, dev
                     o = pred['det']  # yolo_mask model, multi-task
                 else:
                     o = pred  # maskrcnn model
-                
+
                 if score_threshold > 0.:
                     keep = o['scores'] >= score_threshold
                     o = {k: v[keep] for k, v in o.items()}

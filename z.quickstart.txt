@@ -2,13 +2,16 @@
 conda env create --prefix /path/to/conda/env/ -f z.ml_env2_1.10.1.yaml
 
 ## Run patch segmentation for sample image
-python -u run_patch_inference.py --data_path assets/9388_1_1.png --output_dir ./
+python -u run_patch_inference.py --data_path assets/9388_1_1.png --model_path lung --output_dir ./
 
 ## Run whole slide inference with default options
 CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
 
 ## Generate results in folder sample_wsi
-CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --meta_info meta_info_brca.yaml --output_dir test_wsi --save_img --save_csv
+CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi --save_img --save_csv
+
+## Run whole slide inference for lung cancer
+CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path /path/to/slides --model_path lung --output_dir /path/save/results
 
 ## Generate results in folder sample_tme
 CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path ./test_wsi --output_dir ./test_features --n_classes 3 --scale_factor 32 --save_images

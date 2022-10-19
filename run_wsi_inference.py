@@ -3,39 +3,10 @@ import time
 import torch
 import argparse
 from PIL import Image
-from utils_wsi import DATASET_CONFIGS, WholeSlideDataset
-from utils_wsi import yolov5_inference, load_cfg, export_detections_to_image, export_detections_to_table
+from utils_wsi import WholeSlideDataset, yolov5_inference
+from utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table
+from configs import DEFAULT_MODEL_PATH, DATASET_CONFIGS, DEFAULT_MPP
 
-
-DATA_PATH = os.path.join(
-    "/archive/DPDS/Xiao_lab/shared/hudanyun_sheng/pathology_image_data",
-    "TCGA_BRCA/slides/TCGA-Breast Cancer",
-)
-
-DEFAULT_MODEL_PATH = {
-    'lung': './selected_models/benchmark_lung/lung_best.float16.torchscript.pt',
-    'brca': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
-    'nucls1': './selected_models/benchmark_nucls_paper/fold1_epoch6.float16.torchscript.pt',
-    'nucls2': './selected_models/benchmark_nucls_paper/fold2_epoch71.float16.torchscript.pt',
-    'nucls3': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
-    'nucls4': './selected_models/benchmark_nucls_paper/fold4_epoch102.float16.torchscript.pt',
-    'nucls5': './selected_models/benchmark_nucls_paper/fold5_epoch127.float16.torchscript.pt',
-}
-
-# nms_params = {
-#     'conf_thres': 0.15, # score_threshold, discards boxes with score < score_threshold
-#     'iou_thres': 0.45, # iou_threshold, discards all overlapping boxes with IoU > iou_threshold
-#     'classes': None, 
-#     'agnostic': True, # False
-#     'multi_label': False, 
-#     'labels': (), 
-#     'max_det': 300, 
-# }
-
-ROI_NAMES = {
-    'tissue': True,  # use tissue region as roi
-    'xml': '.*',  # use all annotations in slide_id.xml 
-}
 
 def analyze_one_slide(model, dataset, 
                       batch_size=64, n_workers=64, 
@@ -70,7 +41,7 @@ def main(args):
     device = torch.device(args.device)
     
     meta_info = load_cfg(args.meta_info)
-    dataset_configs = {**DATASET_CONFIGS, **meta_info}
+    dataset_configs = {'mpp': DEFAULT_MPP, **DATASET_CONFIGS, **meta_info}
     
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)

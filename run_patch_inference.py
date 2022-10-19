@@ -7,19 +7,17 @@ import argparse
 from PIL import Image
 import torch.nn.functional as F
 from torchvision.io import read_image, write_png
-from utils_wsi import DATASET_CONFIGS, is_image_file, load_cfg
-from utils_wsi import export_detections_to_image, export_detections_to_table
+from utils_wsi import is_image_file, load_cfg, export_detections_to_image, export_detections_to_table
 from utils_image import get_pad_width
+from configs import DEFAULT_MODEL_PATH, DATASET_CONFIGS, DEFAULT_MPP
 
-DATA_PATH = "/project/DPDS/Xiao_lab/shared/Xinyi/202004_RMS/mrcnn/dataset/simplified_40x"
-MODEL_PATH = "./selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt"
 
-def analyze_one_patch(img, model, mpp=None, dataset_configs=DATASET_CONFIGS, 
+def analyze_one_patch(img, model, dataset_configs, mpp=None, 
                       compute_masks=True, device=torch.device('cpu')):
     h_ori, w_ori = img.shape[1:]
     ## rescale
     if mpp is not None and mpp != dataset_configs['mpp']:
-        scale_factor = dataset_configs['mpp'] / opt.mpp
+        scale_factor = dataset_configs['mpp'] / mpp
         img_rescale = F.interpolate(img[None], scale_factor=scale_factor, mode='bilinear', align_corners=False)[0] 
     else:
         scale_factor = 1.0
@@ -56,11 +54,13 @@ def analyze_one_patch(img, model, mpp=None, dataset_configs=DATASET_CONFIGS,
 
 
 def main(args):
+    if args.model_path in DEFAULT_MODEL_PATH:
+        args.model_path = DEFAULT_MODEL_PATH[args.model_path]
     model = torch.jit.load(args.model_path)
     device = torch.device(args.device)
 
     meta_info = load_cfg(args.meta_info)
-    dataset_configs = {**DATASET_CONFIGS, **meta_info}
+    dataset_configs = {'mpp': DEFAULT_MPP, **DATASET_CONFIGS, **meta_info}
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
@@ -79,10 +79,8 @@ def main(args):
         # run inference
         img = read_image(patch_path).type(torch.float32) / 255
         outputs = analyze_one_patch(
-            img, model, mpp=args.mpp, 
-            dataset_configs=dataset_configs, 
-            compute_masks=not args.box_only,
-            device=device,
+            img, model, dataset_configs, mpp=args.mpp, 
+            compute_masks=not args.box_only, device=device,
         )
         res_file = os.path.join(args.output_dir, f"{image_id}_pred.pt")
         torch.save(outputs, res_file)
@@ -95,7 +93,7 @@ def main(args):
         )
         img_file = os.path.join(args.output_dir, f"{image_id}_pred{ext}")
         Image.fromarray(mask_img).save(img_file)
-        # write_png((img_mask*255).type(torch.uint8), opt.output)
+        # write_png((img_mask*255).type(torch.uint8), img_file)
         
         # save to csv
         if args.export_text and 'labels_text' in dataset_configs:
@@ -117,10 +115,10 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', required=True, type=str, help="Input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="A yaml file contains: label texts and colors.")
-    parser.add_argument('--model_path', default=MODEL_PATH, type=str, help="Model path, torch jit model." )
+    parser.add_argument('--model_path', default='brca', type=str, help="Model path, torch jit model." )
     parser.add_argument('--output_dir', default='patch_results', type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
-    parser.add_argument('--mpp', default=DATASET_CONFIGS['mpp'], type=float, help='Input.')
+    parser.add_argument('--mpp', default=DEFAULT_MPP, type=float, help='Input data mpp.')
     # parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
     # parser.add_argument('--num_workers', default=64, type=int, help='Number of workers for data loader.')
     parser.add_argument('--box_only', action='store_true', help="Only save box and ignore mask.")
