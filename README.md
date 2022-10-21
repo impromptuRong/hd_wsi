@@ -9,14 +9,14 @@ Author: **Ruichen Rong** (ruichen.rong@utsouthwestern.edu)
 ## Introduction
 This pipeline is designed for image patch and whole slide level nuclei detection, segmentation and TME feature extraction. The pipeline contains three components. 
 
-The first component (`run_patch_inference.py`) runs a pretrained object detection/segmentation model on image patchs and outputs nuclei locations, types and masks. 
+The first component (`run_patch_inference.py`) runs a pretrained object detection/segmentation model on image patchs and outputs nuclei locations, types and masks. This process can be done in realtime and is integrated into our realtime deepzom server.
 
    Sample input patch      |    Nuclei segmentation
 :-------------------------:|:-------------------------:
 <img src="assets/9388_1_1.png" width="600"/>|<img src="assets/9388_1_1_pred.png" width="600"/>
 
 
-The second component (`run_wsi_inference.py`) applies a pretrained object detection/segmentation model on whole slide images and outputs nuclei locations, types and masks. 
+The second component (`run_wsi_inference.py`) applies a pretrained object detection/segmentation model on whole slide images and outputs nuclei locations, types and masks. Results can be viewed through deepzoom server.
 
    Sample input slide      |    Nuclei segmentation
 :-------------------------:|:-------------------------:
@@ -155,6 +155,18 @@ CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py \
 --n_patches 100 --patch_size 512 \
 --score_thresh 10 --scale_factor 16 \
 --save_images \
+```
+
+### d) Visualize whole slide results
+A deepzoom server is provided for real time segmentation or visualize pre-analyzed results in b). Pre-analyzing the slides and display the results will give better visualization. Realtime version don't need pre-processing, but will generate artifacts and give misleading information on tile borders.
+Example 1: to visualize results tiff images generated in b), run the following:
+```
+python -u deepzoom_server.py --data_path sample.svs --masks test_wsi/sample.tiff --port=8000
+```
+
+Example 2: start a realtime inference server for the sample slide:
+```
+python -u deepzoom_server.py --data_path sample.svs --model brca --port=8000
 ```
 
 

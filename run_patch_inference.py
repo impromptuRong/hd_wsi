@@ -53,7 +53,6 @@ def analyze_one_patch(img, model, dataset_configs, mpp=None,
     res['boxes'] = res['boxes'].to(torch.float32)
     res = {k: v.cpu().detach() for k, v in res.items()}
     t1 = time.time()
-    print(f"Inference time: {t1-t0} s")
 
     return {'cell_stats': res, 'inference_time': t1-t0}
 
@@ -86,6 +85,7 @@ def main(args):
             img, model, dataset_configs, mpp=args.mpp, 
             compute_masks=not args.box_only, device=device,
         )
+        print(f"Inference time: {outputs['inference_time']} s")
         res_file = os.path.join(args.output_dir, f"{image_id}_pred.pt")
         torch.save(outputs, res_file)
 
