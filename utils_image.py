@@ -2367,6 +2367,8 @@ class Slide(object):
                 for page in slide.pages[1:]:
                     if 'label' in page.description or 'macro' in page.description:
                         continue
+                    if page.tilewidth == 0 or page.tilelength == 0:
+                        continue
                     h, w, _ = page.shape
                     if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
                         level_dims.append((w, h))

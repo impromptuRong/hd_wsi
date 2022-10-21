@@ -167,7 +167,7 @@ CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py \
 ### b) Whole slide nuclei detection and segmentation
 1. `slide_id.pt`: The compressed object contains slide information, nuclei locations, scores and types, as well as inference time.
 2. `slide_id.masks.pt`: If model outputs masks and `--box_only` is not enabled, all nuclei masks shrinked into 28x28 pixel are stored in this file.
-3. `slide_id.png`: If `--save_img` is enabled, script will plot a large png image with the same size as input slide (nuclei color are provided through `--meta_info`). Don't enable this option for large image as it will take extremely long time to plot and save.
+3. `slide_id.tiff`: If `--save_img` is enabled, script will plot a large tiff image with the same size as input slide (nuclei color are provided through `--meta_info` with default transparency = 0.3 if not specified). This file can be viewed through [openslide](https://openslide.org) and other tiff viewer. Don't enable this option for large image as it will take extremely long time to plot and save.
 4. `slide_id.csv`: If `--save_csv` is enabled, script will export `boxes`, `scores`, `labels` into this csv file. If `--export_text` is enabled, script will replace numeric labels with text labels defined in `--meta_info`. If `--export_mask` is enabled, an extra column contains masks in polygon format will be added to the csv file. Note that TME feature extraction pipeline takes `slide_id.pt` as input, the csv file is not necessary for downstream analysis. Export csv with text and masks will cost extra time and take more space.
 
 

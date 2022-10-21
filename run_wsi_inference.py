@@ -3,9 +3,10 @@ import time
 import torch
 import argparse
 from PIL import Image
+
+import configs as CONFIGS
 from utils_wsi import WholeSlideDataset, yolov5_inference
-from utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table
-from configs import DEFAULT_MODEL_PATH, DATASET_CONFIGS, DEFAULT_MPP
+from utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table, wsi_imwrite
 
 
 def analyze_one_slide(model, dataset, 
@@ -35,29 +36,29 @@ def analyze_one_slide(model, dataset,
 
 
 def main(args):
-    if args.model_path in DEFAULT_MODEL_PATH:
-        args.model_path = DEFAULT_MODEL_PATH[args.model_path]
-    model = torch.jit.load(args.model_path)
+    if args.model in CONFIGS.MODEL_PATHS:
+        args.model = CONFIGS.MODEL_PATHS[args.model]
+    model = torch.jit.load(args.model)
     device = torch.device(args.device)
-    
+
     meta_info = load_cfg(args.meta_info)
-    dataset_configs = {'mpp': DEFAULT_MPP, **DATASET_CONFIGS, **meta_info}
-    
+    dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
+
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    
+
     if os.path.isdir(args.data_path):
         slide_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
                        if not _.startswith('.') and _.endswith('.svs')]
     else:
         slide_files = [args.data_path]
-    
+
     for slide_file in slide_files:
         svs_file = os.path.join(slide_file)
         slide_id = os.path.splitext(os.path.basename(slide_file))[0]
         res_file = os.path.join(args.output_dir, f"{slide_id}.pt")
         res_file_masks = os.path.join(args.output_dir, f"{slide_id}.masks.pt")
-        
+
         print("==============================")
         if not os.path.exists(res_file):
             t0 = time.time()
@@ -75,6 +76,7 @@ def main(args):
             outputs['meta_info'] = meta_info
             outputs['slide_info'] = dataset.slide.info()
             outputs['slide_size'] = dataset.slide_size
+            outputs['model'] = args.model
             outputs['rois'] = dataset.masks
 
             # we save nuclei masks in a separate file to speed up features extraction without mask.
@@ -91,7 +93,7 @@ def main(args):
             outputs = {}
 
         if args.save_img:
-            img_file = os.path.join(args.output_dir, f"{slide_id}.png")
+            img_file = os.path.join(args.output_dir, f"{slide_id}.tiff")
             if not os.path.exists(img_file):
                 print(f"Exporting result to image: ", end="")
                 t0 = time.time()
@@ -102,11 +104,15 @@ def main(args):
                 mask = export_detections_to_image(
                     outputs['cell_stats'], outputs['slide_size'], 
                     labels_color=outputs['meta_info']['labels_color'],
-                    save_masks=not args.box_only, border=3,
+                    save_masks=not args.box_only, border=3, 
+                    alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
                 )
-                Image.fromarray(mask).save(img_file)
+                # Image.fromarray(mask).save(img_file)
+                wsi_imwrite(mask, img_file, outputs['slide_info'], CONFIGS.TIFF_PARAMS,
+                            model=outputs['model'],
+                           )
                 print(f"{time.time()-t0} s")
-        
+
         if args.save_csv:
             csv_file = os.path.join(args.output_dir, f"{slide_id}.csv")
             if not os.path.exists(csv_file):
@@ -135,7 +141,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', required=True, type=str, help="input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="meta info yaml file: contains label texts and colors.")
-    parser.add_argument('--model_path', default='brca', type=str, help="Model path, torch jit model." )
+    parser.add_argument('--model', default='brca', type=str, help="Model path, torch jit model." )
     parser.add_argument('--output_dir', default='slide_results', type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--roi', default='tissue', type=str, help='ROI region.')

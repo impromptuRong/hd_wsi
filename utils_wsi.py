@@ -20,6 +20,7 @@ import pandas as pd
 import multiprocessing as mp
 
 import matplotlib
+import tifffile
 from matplotlib import pyplot as plt
 from utils_image import Slide, img_as, rgba2rgb, pad, Mask, overlay_detections, image_stats
 from openslide import open_slide
@@ -55,7 +56,7 @@ def get_slide_and_ann_file(svs_file, ann_file=None):
         ann_file = os.path.join(folder_name, slide_id + '.xml')
     if not (isinstance(ann_file, str) and os.path.exists(ann_file)):
         ann_file = None
-    
+
     return slide_id, svs_file, ann_file
 
 
@@ -119,13 +120,13 @@ class WholeSlideDataset(torch.utils.data.Dataset):
         else:
             self.masks = masks
         # print(f"generate masks: {time.time()-st}")
-        
+
         self.patches, self.polygons, self.poly_indices = self.slide.whole_slide_scanner(
             self.window_size, self.page, masks=self.masks, coverage_threshold=0.,
         )
         pars = self.slide.pad_roi(self.patches, self.window_size, self.page, padding=self.window_padding)
         pars += (self.poly_indices,)
-        
+
         self.images = []
         for idx, (coord, roi_slide, roi_patch, pad_width, poly_id) in enumerate(zip(*pars), 1):
             image_info = {
@@ -162,18 +163,18 @@ class WholeSlideDataset(torch.utils.data.Dataset):
         if self.processor is not None:
             kwargs = {**self.kwargs, **self.images[idx]['kwargs']}
             patch = self.processor(patch **kwargs)
-        
+
         return ToTensor()(patch), [roi_slide, roi_patch]
-    
+
     def __len__(self):
         return len(self.images)
-    
+
     def __repr__(self):
         return f"WholeSlideDataset: {len(self)} patches."
-    
+
     def __str__(self):
         return self.info()
-    
+
     def info(self):
         slide_info = f"{self.slide_id}: {self.slide.magnitude}x"
         mpp_info = f"mpp: {self.slide.mpp}->{self.slide.mpp/self.scale}"
@@ -193,12 +194,12 @@ class WholeSlideDataset(torch.utils.data.Dataset):
                 'patches': self.images, 'kwargs': self.kwargs,
             }
             pickle.dump(info, f, protocol=(pickle.HIGHEST_PROTOCOL))
-        
+
         if save_thumbnail:
             image_file_name = os.path.join(output_folder, f'{self.slide_id}.png')
             self.slide.thumbnail().save(image_file_name)
             # skimage.io.imsave(image_file_name, np.array(self.slide.thumbnail()))
-        
+
         if save_mask and self.masks is not None:
             mask_file_name = os.path.join(output_folder, f'{self.slide_id}_mask.png')
             if isinstance(self.masks, np.ndarray):  # mask image
@@ -212,11 +213,11 @@ class WholeSlideDataset(torch.utils.data.Dataset):
     def load(self, folder):
         data_file_name = os.path.join(folder, f'{self.slide_id}.pkl')
         mask_file_name = os.path.join(folder, f'{self.slide_id}_mask.png')
-        
+
         if os.path.exists(data_file_name):
             with open(data_file_name, 'rb') as f:
                 self.images = pickle.load(f)
-        
+
         if os.path.exists(mask_file_name):
             self.masks = img_as('bool')(skimage.io.imread(mask_file_name))
 
@@ -225,7 +226,7 @@ class WholeSlideDataset(torch.utils.data.Dataset):
             indices = range(len(self))
         elif isinstance(indices, numbers.Number):
             indices = np.random.choice(len(self), indices)
-        
+
         labels_color = self.kwargs['labels_color']
         labels_text = self.kwargs['labels_text']
         for idx in indices:
@@ -233,7 +234,7 @@ class WholeSlideDataset(torch.utils.data.Dataset):
             patch, patch_info = self[idx]
             patch = patch.permute(1, 2, 0).numpy()
             h, w = patch.shape[0], patch.shape[1]
-            
+
             print('===================')
             print(patch_id, patch_info)
             fig, axes = plt.subplots(1, 2, figsize=(12, 6))
@@ -351,11 +352,11 @@ def export_detections_to_table(res, converter=None, labels_text=None, save_masks
             entry += [poly_x, poly_y]
 
         df.append(entry)
-    
+
     return pd.DataFrame(df, columns=columns)
 
 
-def export_detections_to_image(res, img_size, labels_color, save_masks=True, border=3):
+def export_detections_to_image(res, img_size, labels_color, save_masks=True, border=3, alpha=1.0):
     h_s, w_s = img_size
     boxes, labels = res['boxes'], res['labels']
     masks = res['masks'] if ('masks' in res and save_masks) else [None] * len(boxes)
@@ -367,6 +368,7 @@ def export_detections_to_image(res, img_size, labels_color, save_masks=True, bor
             color_tensor[k] = torch.tensor(matplotlib.colors.to_rgba(v)) * 255
         else:
             color_tensor[-1] = torch.tensor(matplotlib.colors.to_rgba(v)) * 255  # outlier class
+    color_tensor[..., -1] = color_tensor[..., -1] * alpha  # apply extra transparency
 
     img_label = torch.zeros((h_s, w_s), dtype=torch.int)
     for box, label, mask in zip(boxes, labels, masks):
@@ -377,7 +379,7 @@ def export_detections_to_image(res, img_size, labels_color, save_masks=True, bor
         x_1 = min(box[2] + 1, w_s)
         y_0 = max(box[1], 0)
         y_1 = min(box[3] + 1, h_s)
-        
+
         if label > 0:  # we ignore unclassified
             if mask is not None:  # draw mask
                 # mask = F.interpolate(mask[None].float(), size=(h, w), mode="bilinear", align_corners=False)[0][0]
@@ -392,3 +394,24 @@ def export_detections_to_image(res, img_size, labels_color, save_masks=True, bor
 
     return F.embedding(img_label, color_tensor).numpy()
 
+
+def wsi_imwrite(image, filename, slide_info, tiff_params, **kwargs):
+    w0, h0 = image.shape[1], image.shape[0]
+    tile_w, tile_h = tiff_params['tile']
+    mpp = slide_info['mpp']
+    # software='Aperio Image Library v11.1.9'
+
+    with tifffile.TiffWriter(filename, bigtiff=True) as tif:
+        descp = f"HD-Yolo\n{w0}x{h0} ({tile_w}x{tile_h}) RGBA|MPP = {mpp}"
+        for k, v in kwargs.items():
+            descp += f'|{k} = {v}'
+        # resolution=(mpp * 1e-4, mpp * 1e-4, 'CENTIMETER')
+        tif.save(image, metadata=slide_info, description=descp, **tiff_params,)
+
+        for w, h in sorted(slide_info['level_dims'][1:], key=lambda x: x[0], reverse=True):
+            image = cv2.resize(image, dsize=(w, h), interpolation=cv2.INTER_LINEAR)
+            descp = f"{w0}x{h0} ({tile_w}x{tile_h}) -> {w}x{h} RGBA"
+            # tile = (page.tilewidth, page.tilelength) if page.tilewidth > 0 and page.tilelength > 0 else None
+            # resolution=(mpp * 1e-4 * w0/w, mpp * 1e-4 * h0/h, 'CENTIMETER')
+            # 'subfiletype': 1 if level else 0,
+            tif.save(image, description=descp, **tiff_params,)

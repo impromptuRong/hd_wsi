@@ -1,8 +1,12 @@
 import os
 
 DEFAULT_MPP = 0.25
+PATCH_SIZE = 512
+PADDING = 64
+PAGE = 0
+MASK_ALPHA = 0.3
 
-DEFAULT_MODEL_PATH = {
+MODEL_PATHS = {
     'lung': './selected_models/benchmark_lung/lung_best.float16.torchscript.pt',
     'brca': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
     'nucls1': './selected_models/benchmark_nucls_paper/fold1_epoch6.float16.torchscript.pt',
@@ -12,10 +16,10 @@ DEFAULT_MODEL_PATH = {
     'nucls5': './selected_models/benchmark_nucls_paper/fold5_epoch127.float16.torchscript.pt',
 }
 
-DATASET_CONFIGS = {
-    'patch_size': 512,
-    'padding': 64,
-    'page': 0,
+DATASETS = {
+    'patch_size': PATCH_SIZE,
+    'padding': PADDING,
+    'page': PAGE,
     'labels': ['bg', 'tumor', 'stromal', 'immune', 'blood', 'macrophage', 'dead', 'other',],
     'labels_color': {
         -100: '#949494',
@@ -47,4 +51,10 @@ NMS_PARAMS = {
 ROI_NAMES = {
     'tissue': True,  # use tissue region as roi
     'xml': '.*',  # use all annotations in slide_id.xml 
+}
+
+TIFF_PARAMS = {
+    'tile': (256, 256), 
+    'photometric': 'RGB',
+    'compress': True,  # compression=('jpeg', 95),  # None RGBA, requires imagecodecs
 }

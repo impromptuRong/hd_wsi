@@ -200,8 +200,6 @@ if __name__ == '__main__':
     parser.add_argument('--box_only', action='store_true', help='Ignore nuclei mask morphological features.')
     parser.add_argument('--save_nuclei', action='store_true', help='Store nuclei morphological features into a csv file.')
     parser.add_argument('--save_images', action='store_true', help='Store img, dots, densities, roi masks.')
-    
+
     args = parser.parse_args()
-    
     main(args)
-    

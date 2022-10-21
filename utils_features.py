@@ -22,7 +22,7 @@ import skimage.morphology
 
 from utils_image import random_sampling_in_polygons, binary_mask_to_polygon, polygon_areas, ObjectProperties
 
-#
+
 """ Nuclei feature codes:
     1. Nuclei morphological features.
     roi_area: overall tumor/tissue region.
@@ -91,7 +91,7 @@ def filter_wsi_results(x, n_classes=None, **kwargs):
     if iou_threshold < 1.:
         keep = torchvision.ops.nms(x['boxes'], x['scores'], iou_threshold=iou_threshold)
         x = {k: v[keep] for k, v in x.items()}
-    
+
     return x
 
 
@@ -180,7 +180,7 @@ def scatter_plot(nuclei_map, r_ave, labels_color, scale_factor=1./64):
     r_rgb = {k: v for k, v in enumerate(np.nanmax(r_rgb, 0))}
     pts_image = rescale_nuclei_map(new_pts, r_rgb, scale_factor=scale_factor, grid=4096)
     p_image = (pts_image.permute(1, 2, 0).numpy() > 0) * 1.0
-    
+
     return p_image
 
 
@@ -190,7 +190,7 @@ def density_plot(cloud_d, scale_factor):
     # d_map = torch.nn.functional.interpolate(d_map[None], scale_factor=scale_factor)[0]
     # t_l = d_map[1] * d_map[2]
     d_map = d_map.permute(1, 2, 0).numpy()
-    
+
     return np.clip(d_map, 0., 1.)
 
 
@@ -217,9 +217,6 @@ def apply_filters(x, radius, scale_factor=1.0, method='gaussian', grid=4096, dev
     #             kernel = skimage.morphology.disk(round(r))
     #             kernel = scipy.ndimage.distance_transform_edt(kernel)
 
-    #         plt.imshow(kernel)
-    #         plt.show()
-            
             try:  # RuntimeError: std::bad_alloc with torch 1.9 and 1.10 on cpu
                 padding = [_//2 for _ in kernel.shape]
                 m = F.conv2d(x_rescale[k][None, None].to(device), 
@@ -249,14 +246,14 @@ def delaunay_features(coords, labels, min_dist=0., max_dist=np.inf):
     tri = scipy.spatial.Delaunay(coords)
     # indices, indptr = tri.vertex_neighbor_vertices
     indices = tri.simplices.T
-    
+
     # merge results
     idx_1 = indices.flatten()
     idx_2 = indices[[1,2,0]].flatten()
     pairs = np.array(['{}_{}'.format(*sorted(_)) for _ in zip(labels[idx_1], labels[idx_2])])
     dists = torch.norm((coords[idx_1] - coords[idx_2]), p=2, dim=1).numpy()
     keep = (dists > min_dist) * (dists < max_dist)
-    
+
     return pairs[keep].tolist(), dists[keep].tolist()
 
 
@@ -278,12 +275,12 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
     if isinstance(patch_size, numbers.Number):
         patch_size = (patch_size, patch_size)
     patch_size = np.array(patch_size)
-    
+
     if image_size is None:
         w, h = np.concatenate(polygons).max(0).astype(np.int32)
     else:
         w, h = image_size
-    
+
     pool_size = N * sampling_factor
     coords, indices = random_sampling_in_polygons(polygons, pool_size, plot=plot_selection, seed=seed)
     coords = coords - patch_size / 2 + np.random.uniform(-0.5, 0.5, size=(pool_size, 2)) * patch_size
@@ -301,7 +298,7 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
         scores = np.array([masks[y0:y0+dh, x0:x0+dw].sum()/dw/dh for x0, y0, dw, dh in patches.astype(np.int)])
     else:
         scores = np.array([scores_fn(_) for _ in patches.astype(np.int)])
-    
+
     cutoff = scores >= score_threshold
     patches, scores, indices = patches[cutoff], scores[cutoff], indices[cutoff]
     patches = torch.from_numpy(patches).type(torch.float32)
@@ -389,15 +386,15 @@ def extract_tme_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
         ## extract delanunay features and counts
         labels, x, y = nuclei_map.indices()
         coords = torch.stack([x, y], dim=-1).float()
-        
+
         def _score_fn(patch):
             x0, y0, w, h = patch
             keep = (coords[:,0] >= y0) & (coords[:,1] >= x0) & (coords[:,0] < y0+w) & (coords[:,1] < x0+h)
             coords_patch, labels_patch = coords[keep], labels[keep]
             core_nuclei = sum(labels_patch==i for i in roi_indices)
-            
+
             return core_nuclei.sum()
-        
+
         # random select patches
         patches, indices = random_patches(
             n_patches * 2, patch_size, polygons, 
@@ -432,7 +429,7 @@ def extract_tme_features(nuclei_map, radius, scale_factor=0.1, roi_indices=[0],
 
     cell_counts = Counter(cellinfo['counts'])
     cellinfo_f = {f'{k}.count': cell_counts.get(k, 0) for k in radius}
-    
+
     return {'roi_area': sum(poly_areas), **nuclei_radius, **cellinfo_f, **dot_product, **delaunay,}, cloud_d, masks
 
 
@@ -442,7 +439,7 @@ def merge_tme_features_by_ids(x, slide_pat_map=None):
     """
     if slide_pat_map is None:
         return x
-    
+
     def dict_add(x, y):
         res = {}
         for k in x.keys() | y.keys():
@@ -452,13 +449,13 @@ def merge_tme_features_by_ids(x, slide_pat_map=None):
                 res[k] = x[k]
             elif k in y:
                 res[k] = y[k]
-        
+
         return res
-    
+
     data = defaultdict(list)
     for slide_id, pat_id in slide_pat_map.items():
         data[pat_id].append(x[slide_id])
-    
+
     return {pat_id: reduce(dict_add, _) for pat_id, _ in data.items()}
 
 
@@ -469,7 +466,6 @@ def name_converter(x, rep):
     """
     # pattern = re.compile("|".join(rep.keys()))
     # return pattern.sub(lambda m: rep[re.escape(m.group(0))], a)
-
     entry = x.split('.')
     entry[0] = '_'.join([rep.get(_, _) for _ in entry[0].split('_')])
     return '.'.join(entry)
@@ -487,7 +483,7 @@ def summarize_normalized_features(x, slide_pat_map=None):
     """
     ## Merge slides if necessary
     x = merge_tme_features_by_ids(x, slide_pat_map)
-    
+
     ## Calculate mean, std, count for edges, merge all features into dataframe
     df = {}
     for slide_id, entry in x.items():

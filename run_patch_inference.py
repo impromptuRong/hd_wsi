@@ -7,9 +7,10 @@ import argparse
 from PIL import Image
 import torch.nn.functional as F
 from torchvision.io import read_image, write_png
+
+import configs as CONFIGS
 from utils_wsi import is_image_file, load_cfg, export_detections_to_image, export_detections_to_table
 from utils_image import get_pad_width
-from configs import DEFAULT_MODEL_PATH, DATASET_CONFIGS, DEFAULT_MPP
 
 
 def analyze_one_patch(img, model, dataset_configs, mpp=None, 
@@ -25,11 +26,15 @@ def analyze_one_patch(img, model, dataset_configs, mpp=None,
     h_rescale, w_rescale = img_rescale.shape[1:]
 
     ## pad to 64
-    input_h, input_w = math.ceil(h_rescale / 64) * 64, math.ceil(w_rescale / 64) * 64
-    pad_width = get_pad_width((h_rescale, w_rescale), (input_h, input_w), pos='center', stride=1)
-    inputs = F.pad(img_rescale[None], [pad_width[1][0], pad_width[1][1], pad_width[0][0], pad_width[0][1]], 
-                   mode='constant', value=0.)
-    
+    if h_rescale % 64 != 0 or w_rescale % 64 != 0:
+        input_h, input_w = math.ceil(h_rescale / 64) * 64, math.ceil(w_rescale / 64) * 64
+        pad_width = get_pad_width((h_rescale, w_rescale), (input_h, input_w), pos='center', stride=1)
+        inputs = F.pad(img_rescale[None], [pad_width[1][0], pad_width[1][1], pad_width[0][0], pad_width[0][1]], 
+                       mode='constant', value=0.)
+    else:
+        pad_width = [(0, 0), (0, 0)]
+        inputs = img_rescale[None]
+
     if device.type == 'cpu':  # half precision only supported on CUDA
         model.float()
     model.eval()
@@ -49,29 +54,28 @@ def analyze_one_patch(img, model, dataset_configs, mpp=None,
     res = {k: v.cpu().detach() for k, v in res.items()}
     t1 = time.time()
     print(f"Inference time: {t1-t0} s")
-    
+
     return {'cell_stats': res, 'inference_time': t1-t0}
 
 
 def main(args):
-    if args.model_path in DEFAULT_MODEL_PATH:
-        args.model_path = DEFAULT_MODEL_PATH[args.model_path]
-    model = torch.jit.load(args.model_path)
+    if args.model in CONFIGS.MODEL_PATHS:
+        args.model = CONFIGS.MODEL_PATHS[args.model]
+    model = torch.jit.load(args.model)
     device = torch.device(args.device)
 
     meta_info = load_cfg(args.meta_info)
-    dataset_configs = {'mpp': DEFAULT_MPP, **DATASET_CONFIGS, **meta_info}
+    dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
 
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
-    
+
     if os.path.isdir(args.data_path):
         patch_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
                        if is_image_file(_)]
     else:
         patch_files = [args.data_path]
-    
-    
+
     for patch_path in patch_files:
         print("==============================")
         print(patch_path)
@@ -90,11 +94,12 @@ def main(args):
             outputs['cell_stats'], (img.shape[1], img.shape[2]), 
             labels_color=dataset_configs['labels_color'],
             save_masks=not args.box_only, border=3,
+            alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
         )
         img_file = os.path.join(args.output_dir, f"{image_id}_pred{ext}")
         Image.fromarray(mask_img).save(img_file)
         # write_png((img_mask*255).type(torch.uint8), img_file)
-        
+
         # save to csv
         if args.export_text and 'labels_text' in dataset_configs:
             labels_text = dataset_configs['labels_text']
@@ -115,10 +120,10 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', required=True, type=str, help="Input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="A yaml file contains: label texts and colors.")
-    parser.add_argument('--model_path', default='brca', type=str, help="Model path, torch jit model." )
+    parser.add_argument('--model', default='brca', type=str, help="Model path, torch jit model." )
     parser.add_argument('--output_dir', default='patch_results', type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
-    parser.add_argument('--mpp', default=DEFAULT_MPP, type=float, help='Input data mpp.')
+    parser.add_argument('--mpp', default=None, type=float, help='Input data mpp.')
     # parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
     # parser.add_argument('--num_workers', default=64, type=int, help='Number of workers for data loader.')
     parser.add_argument('--box_only', action='store_true', help="Only save box and ignore mask.")
