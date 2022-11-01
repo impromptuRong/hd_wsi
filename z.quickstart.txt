@@ -22,3 +22,6 @@ python -u deepzoom_server.py --data_path 11170.svs --masks 11170_results/11170.t
 ## Start a realtime inference server
 CUDA_VISIBLE_DEVICES=0 python -u deepzoom_server.py --data_path 11170.svs --model lung --port=8001
 
+## Start a realtime server with a folder of slides
+CUDA_VISIBLE_DEVICES=0 python -u deepzoom_multiserver.py --data_path /path/to/slide --model lung --port=8001
+

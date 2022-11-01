@@ -169,6 +169,11 @@ Example 2: start a realtime inference server for the sample slide:
 python -u deepzoom_server.py --data_path sample.svs --model brca --port=8000
 ```
 
+Example 3: start a realtime inference server for a folder of lung cancer slides:
+```
+python -u deepzoom_multiserver.py --data_path /path/to/slides/folder --model lung --port=8001
+```
+
 
 ## Result files
 ### a) Image patch nuclei segmentation
