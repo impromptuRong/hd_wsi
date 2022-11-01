@@ -6,6 +6,7 @@ import random
 import pickle
 import numbers
 import skimage
+import datetime
 
 import torch
 import torch.nn.functional as F
@@ -401,19 +402,19 @@ def wsi_imwrite(image, filename, slide_info, tiff_params, **kwargs):
     w0, h0 = image.shape[1], image.shape[0]
     tile_w, tile_h = tiff_params['tile']
     mpp = slide_info['mpp']
+    now = datetime.datetime.now()
     # software='Aperio Image Library v11.1.9'
 
     with tifffile.TiffWriter(filename, bigtiff=True) as tif:
-        descp = f"HD-Yolo\n{w0}x{h0} ({tile_w}x{tile_h}) RGBA|MPP = {mpp}"
+        descp = f"HD-Yolo\n{w0}x{h0} ({tile_w}x{tile_h}) RGBA|{now.strftime('Date = %Y-%m-%d|Time = %H:%M:%S')}"
         for k, v in kwargs.items():
             descp += f'|{k} = {v}'
         # resolution=(mpp * 1e-4, mpp * 1e-4, 'CENTIMETER')
-        tif.save(image, metadata=slide_info, description=descp, **tiff_params,)
+        tif.save(image, metadata=None, description=descp, subfiletype=0, **tiff_params,)
 
         for w, h in sorted(slide_info['level_dims'][1:], key=lambda x: x[0], reverse=True):
             image = cv2.resize(image, dsize=(w, h), interpolation=cv2.INTER_LINEAR)
             descp = f"{w0}x{h0} ({tile_w}x{tile_h}) -> {w}x{h} RGBA"
             # tile = (page.tilewidth, page.tilelength) if page.tilewidth > 0 and page.tilelength > 0 else None
             # resolution=(mpp * 1e-4 * w0/w, mpp * 1e-4 * h0/h, 'CENTIMETER')
-            # 'subfiletype': 1 if level else 0,
-            tif.save(image, description=descp, **tiff_params,)
+            tif.save(image, metadata=None, description=descp, subfiletype=1, **tiff_params,)

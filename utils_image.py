@@ -2108,7 +2108,7 @@ def overlay_detections(ax, bboxes=None, labels=None, masks=None, scores=None,
             if x1 == x2 and y1 == y2:
                 ax.plot([y1], [x1], marker='o', markersize=3, color=c)
             else:
-                b = Rectangle((y1, x1), y2-y1, x2-x1, linewidth=2,
+                b = Rectangle((y1, x1), y2-y1, x2-x1, linewidth=3,
                               alpha=0.5, linestyle="solid", edgecolor=c, facecolor="none")
                 ax.add_patch(b)
         
@@ -2349,19 +2349,19 @@ class Slide(object):
             with open(self.svs_file, 'rb') as fp:
                 slide = TiffFile(fp)
                 self.description = slide.pages[0].description
-                
+
                 # magnification
-                val = re.findall(r'\|AppMag = (?P<mag>[\d.]+)', self.description)
-                self.magnitude = float(val[0]) if val else None
+                val = re.findall(r'\|((?i:AppMag)|(?i:magnitude)) = (?P<mag>[\d.]+)', self.description)
+                self.magnitude = float(val[0][1]) if val else None
                 if verbose and self.magnitude is None:
                     print(f"Didn't find magnitude in description.")
-                
+
                 # mpp
-                val = re.findall(r'\|MPP = (?P<mag>[\d.]+)', self.description)
-                self.mpp = float(val[0]) if val else None
+                val = re.findall(r'\|((?i:MPP)) = (?P<mpp>[\d.]+)', self.description)
+                self.mpp = float(val[0][1]) if val else None
                 if verbose and self.mpp is None:
                     print(f"Didn't find mpp in description.")
-                
+
                 ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
                 level_dims, scales = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0]
                 for page in slide.pages[1:]:
