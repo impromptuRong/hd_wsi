@@ -359,9 +359,11 @@ def export_detections_to_table(res, converter=None, labels_text=None, save_masks
 def export_detections_to_image(res, img_size, labels_color, save_masks=True, border=3, alpha=1.0):
     h_s, w_s = img_size
     boxes, labels = res['boxes'], res['labels']
+    if not len(labels):  # empty results
+        return np.zeros((h_s, w_s, 4), dtype=np.uint8)
+
     masks = res['masks'] if ('masks' in res and save_masks) else [None] * len(boxes)
     max_val = labels.max().item()
-
     color_tensor = torch.zeros((max_val + 1 + 1, 4), dtype=torch.uint8)
     for k, v in labels_color.items():
         if k > 0 and k <= max_val:
