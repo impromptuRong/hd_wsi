@@ -405,7 +405,7 @@ def wsi_imwrite(image, filename, slide_info, tiff_params, **kwargs):
     now = datetime.datetime.now()
     # software='Aperio Image Library v11.1.9'
 
-    with tifffile.TiffWriter(filename, bigtiff=True) as tif:
+    with tifffile.TiffWriter(filename, bigtiff=False) as tif:
         descp = f"HD-Yolo\n{w0}x{h0} ({tile_w}x{tile_h}) RGBA|{now.strftime('Date = %Y-%m-%d|Time = %H:%M:%S')}"
         for k, v in kwargs.items():
             descp += f'|{k} = {v}'
