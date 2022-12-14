@@ -1,13 +1,9 @@
-# Histological based Patch Segmentatin, Whole Slide Nuclei Segmentation and TME Feature Extraction Pipeline
-
 ![QBRC logo](assets/qbrc.jpeg)
-
-Author: **Ruichen Rong** (ruichen.rong@utsouthwestern.edu)
-
+# Histological based Whole Slide Nuclei Segmentation and TME Feature Extraction Pipeline
 
 
 ## Introduction
-This pipeline is designed for image patch and whole slide level nuclei detection, segmentation and TME feature extraction. The pipeline contains three components. 
+This pipeline is designed for image patch and whole slide level nuclei detection, segmentation and TME feature extraction. The pipeline uses `HD-Yolo` algorithm by default for real-time nuclei segmentation cross the whole slide and utilize the results for TME feature analysis. There are four components in this repo.
 
 The first component (`run_patch_inference.py`) runs a pretrained object detection/segmentation model on image patchs and outputs nuclei locations, types and masks. This process can be done in realtime and is integrated into our realtime deepzom server.
 
@@ -28,34 +24,35 @@ The third component (`summarize_tme_features.py`) extract nuclei morphological f
 :-------------------------:|:-------------------------:
 ![](assets/sample_tme/images/sample.scatter_img.png)  |  ![](assets/sample_tme/images/sample.density_img.png)
 
+The last component (`deepzoom_server.py`) can either view the results from the second component or do real-time nuclei segmentation on given slides.
+
 
 ## Installation
-Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI script (`run_wsi_inference.py`) on large dataset. GPU memory depends on the model size and batch size. By default, the `Yolo_mask` model takes 12GB memory for optimized performance. 
+Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI script (`run_wsi_inference.py`) on large dataset. GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 12GB memory for optimized performance. 
 
-### Build conda environment on BioHPC
-Step 1. Login into a delegate GPU node and load modules(e.g. 172.18.225.252, 172.18.227.84, 172.18.227.85)
-```
-ssh username@172.18.225.252
-module add python/3.8.x-anaconda
-```
+### Build conda environment
+Step 1. Install Anaconda/Miniconda from (https://www.anaconda.com)
+
 Step 2. clone the repo and install the environment:
 ```
-git clone https://git.biohpc.swmed.edu/QBRC/deep-learning/development/hd_wsi.git
+git clone https://github.com/impromptuRong/hd_wsi.git
 cd hd_wsi
 conda env create --prefix /path/to/conda/env/ -f z.ml_env2_1.10.1.yaml
 conda activate /path/to/conda/env/
 ```
 
-Step 3. Download pretrained models from BioHPC. Pretrained `Yolo_mask` models are provided for lung cancer and breast cancer. Copy them into `hd_wsi` folder or specify your own model. (The default models used in the script are `benchmark_lung/lung_best.float16.torchscript.pt` and `benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt`)
-```
-cp -r /project/DPDS/Xiao_lab/shared/RuichenRong/Packages/hd_wsi/selected_models/ hd_wsi/
-```
-When building pipeline with customized model, the pytorch model should be in eval mode and has standard object detection output format `(losses: Optional, outputs: Dict[str, torch.Tensor])` with required keys: `'boxes'`, `'labels'`, `'scores'`, and optional keys `'masks'`, `'keypoints'`, etc in `outputs`. (See [torchvision MaskRCNN](https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#defining-the-dataset) format for details). The pytorch model should then be converted into a [torchscript](https://pytorch.org/docs/stable/jit.html) model under the **same pytorch version** installed in the environment. (torchscript ops are not consistent between different pytorch version. Be caucious with compatibility issue.)
+Step 3. Load pretrained models. We provide 2 pretrained `HD-Yolo` models for lung cancer and breast cancer. Download the pretrained models from the list below and make sure the paths to these models are consistent with the `MODEL_PATHS` parameters in the `configs.py`.
+<ul>
+   <li> <a href="https://drive.google.com/file/d/131RQwmrQeonwuLr46L06gWZ8Jv60opSt/view?usp=share_link">lung cancer model</a> </li>
+   <li> <a href="https://drive.google.com/file/d/131zR4g-V1wmjXBhmzuEGnqt-ttzNuSPK/view?usp=share_link">breast cancer model</a> </li>
+</ul>
+
+When using customized model, be sure the [torchscript](https://pytorch.org/docs/stable/jit.html) model will output the results in the format `(losses: Optional, outputs: Dict[str, torch.Tensor])` with required keys: `'boxes'`, `'labels'`, `'scores'`, and optional keys `'masks'`, `'keypoints'`, etc in `outputs`. (See [torchvision MaskRCNN](https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#defining-the-dataset) format for details). 
 
 
 ## User Guideline
 ### a) Image patch nuclei segmentation
-The script `run_patch_inference.py` analyzes a single image patch or a folder of image patches with given model and outputs nuclei detection and segmentation results. Image patches are analyzed one-by-one without parallel, so image patches with different sizes are allowed. By default, model uses breast cancer `Yolo_mask` model to segment the following nuclei: tumor, stromal, immune, blood, macrophage, necrosis and others. mpp need to be specified with option `--mpp`. The script will automatically align image patch scale to default scale (mpp=0.25, 40x) during inference and convert result to the original input size. Run `python run_patch_inference.py -h` for all options.
+The script `run_patch_inference.py` analyzes a single image patch or a folder of image patches with given model and outputs nuclei detection and segmentation results. Image patches are analyzed one-by-one without parallel, so image patches with different sizes are allowed. By default, model uses breast cancer `HD-Yolo` model to segment the following nuclei: tumor, stromal, immune, blood, macrophage, necrosis and others. mpp need to be specified with option `--mpp`. The script will automatically align image patch scale to default scale (mpp=0.25, 40x) during inference and convert result to the original input size. Run `python run_patch_inference.py -h` for all options.
 
 Example 1. Produce the result of a 40x lung cancer image patch displayed in the introduction:
 ```
@@ -69,12 +66,12 @@ python run_patch_inference.py --data_path /path/to/patch_folder --output_dir /pa
 
 
 ### b) Whole slide nuclei detection and segmentation
-The script `run_wsi_inference.py` accepts a single slide or a folder of slides as inputs and outputs nuclei detection and segmentation results from given model. By default, model uses breast cancer `Yolo_mask` model to detect the following nuclei: tumor, stromal, immune, blood, macrophage, necrosis and others. Slides with different magnification and mpp will be aligned to mpp=0.25 (40x) during inference but convert back to the original mpp and scale in results. Run `python run_wsi_inference.py -h` for all options.
+The script `run_wsi_inference.py` accepts a single slide or a folder of slides as inputs and outputs nuclei detection and segmentation results from given model. By default, model uses breast cancer `HD-Yolo` model to detect the following nuclei: tumor, stromal, immune, blood, macrophage, necrosis and others. Slides with different magnification and mpp will be aligned to mpp=0.25 (40x) during inference but convert back to the original mpp and scale in results. Run `python run_wsi_inference.py -h` for all options.
 
 
 Example 1. Quick start with pretrained breast cancer model on the sample BRCA slide with default options:
 ```
-CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
+python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
 ```
 
 Example 2. Detect only box on cpu with the default lung cancer model and export result to csv
@@ -82,9 +79,9 @@ Example 2. Detect only box on cpu with the default lung cancer model and export 
 python -u run_wsi_inference.py --data_path sample.svs --model_path lung --output_dir test_wsi_box_only --device cpu --box_only --save_csv
 ```
 
-Example 3. Run a large customized RCNN model on a folder of slides with annotations. Export results to image, and save mask and text information into csv file.
+Example 3. Run a customized model on a folder of slides with annotations. Export results to image, and save mask and text information into csv file.
 ```
-CUDA_VISIBLE_DEVICES=1 python -u run_wsi_inference.py \
+python -u run_wsi_inference.py \
 --data_path /path/to/folder \
 --meta_info text_color_info.yaml \
 --model_path /path/to/model/ \
@@ -144,12 +141,12 @@ By default, Delaunay graph based features are summarized from a maximum of 10 ra
 
 Example 1. Analyze results from `sample.svs` and save plots with default settings.
 ```
-CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path test_wsi --output_dir ./test_features --n_classes 3 --save_images
+python -u summarize_tme_features.py --model_res_path test_wsi --output_dir ./test_features --n_classes 3 --save_images
 ```
 
 Example 2. Customize Delaunay graph based and density based features: randomly select 100 512x512 patches with more than 10 tumor and calculate density under 1/16
 ```
-CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py \
+python -u summarize_tme_features.py \
 --model_res_path /path/to/output_wsi \
 --output_dir /path/to/output_tme \
 --n_patches 100 --patch_size 512 \
@@ -157,21 +154,21 @@ CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py \
 --save_images \
 ```
 
-### d) Visualize whole slide results
+### d) Realtime segmentation and Visualize whole slide results
 A deepzoom server is provided for real time segmentation or visualize pre-analyzed results in b). Pre-analyzing the slides and display the results will give better visualization. Realtime version don't need pre-processing, but will generate artifacts and give misleading information on tile borders.
 Example 1: to visualize results tiff images generated in b), run the following:
 ```
-python -u deepzoom_server.py --data_path sample.svs --masks test_wsi/sample.tiff --port=8000
+python -u deepzoom_server.py --data_path sample.svs --masks test_wsi/sample.tiff --port=8080
 ```
 
 Example 2: start a realtime inference server for the sample slide:
 ```
-python -u deepzoom_server.py --data_path sample.svs --model brca --port=8000
+python -u deepzoom_server.py --data_path sample.svs --model brca --port=8080
 ```
 
 Example 3: start a realtime inference server for a folder of lung cancer slides:
 ```
-python -u deepzoom_multiserver.py --data_path /path/to/slides/folder --model lung --port=8001
+python -u deepzoom_multiserver.py --data_path /path/to/slides/folder --model lung --port=8080
 ```
 
 
@@ -198,9 +195,21 @@ python -u deepzoom_multiserver.py --data_path /path/to/slides/folder --model lun
 
 
 ## Citation
-HD-Yolo: A fast histology-based nuclei segmentation and feature extraction pipeline with Yolo
+A Deep Learning Approach for Histology-Based Nuclei Segmentation and Tumor Microenvironment Characterization
+``` 
+@article{rong2022deep,
+  title={A Deep Learning Approach for Histology-Based Nuclei Segmentation and Tumor Microenvironment Characterization},
+  author={Rong, Ruichen and Sheng, Hudanyun and Jin, Kevin W and Wu, Fangjiang and Luo, Danni and Wen, Zhuoyu and Tang, Chen and Yang, Donghan M and Jia, Liwei and Amgad, Mohamed and others},
+  journal={bioRxiv},
+  year={2022},
+  publisher={Cold Spring Harbor Laboratory}
+}
+```
 
+## Contact
+If you have any questions or suggestions, please contact the following:
 
-## License
-#### The 3-Clause BSD License
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+Develpoper: Ruichen Rong (ruichen.rong@utsouthwestern.edu)<br>
+Maintainer: Hudanyun Sheng (hudanyun.sheng@utsouthwestern.edu)<br>
+Corresponding: Shidan Wang (shidan.wang@utsouthwestern.edu)<br>
+Corresponding: Guanghua Xiao (guanghua.xiao@utsouthwestern.edu)</br>
