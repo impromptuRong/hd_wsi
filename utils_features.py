@@ -337,7 +337,7 @@ def extract_nuclei_features(x, box_only=False, n_classes=None, num_workers=None,
     if box_only or 'masks' not in x:
         w = (x['boxes'][:,2] - x['boxes'][:,0] + TO_REMOVE)
         h = (x['boxes'][:,3] - x['boxes'][:,1] + TO_REMOVE)
-        return {'box_area': (h * w).numpy(), 'label': x['labels'].numpy()}
+        return {'box_area': (h * w).numpy(), 'labels': x['labels'].numpy()}
     else:
         # we need a way to vectorize this, pool.starmap is super slow
         df = [_regionprops(box, label, mask)
