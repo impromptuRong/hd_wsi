@@ -4,8 +4,8 @@ import pickle
 import argparse
 import glob
 from collections import Counter
-from utils_features import *
-from utils_image import Slide
+from utils.utils_features import *
+from utils.utils_image import Slide
 
 SEED = 42
 SCALE_FACTOR = 32
@@ -121,12 +121,12 @@ def main(args):
 
             # load a thumbnail image
             try:
-                svs_file = os.path.join(args.data_path, slide_info['svs_file'])
-                xml_file = os.path.join(args.data_path, slide_info['xml_file']) if slide_info['xml_file'] is not None else None
+                svs_file = os.path.join(args.data_path, slide_info['img_file'])
+                xml_file = os.path.join(args.data_path, slide_info['ann_file']) if slide_info['ann_file'] is not None else None
                 slide = Slide(svs_file, xml_file, verbose=False)
                 slide_img = slide.thumbnail((1024, 1024))
             except:
-                print(f"Didn't find the original slide: {svs_file}. Will skip slide thumbnail image.")
+                print(f"Didn't find the original slide: {slide_info['img_file']}. Will skip slide thumbnail image.")
                 slide = None
                 slide_img = None
 

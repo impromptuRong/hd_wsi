@@ -1,4 +1,5 @@
 import os
+import cv2
 import math
 import time
 import torch
@@ -6,16 +7,19 @@ import numbers
 import argparse
 from PIL import Image
 import torch.nn.functional as F
-from torchvision.io import read_image, write_png
+from torchvision.transforms import ToTensor
+import skimage.io
 
 import configs as CONFIGS
-from utils_wsi import is_image_file, load_cfg, export_detections_to_image, export_detections_to_table
-from utils_image import get_pad_width
+from utils.utils_wsi import is_image_file, load_cfg, export_detections_to_image, export_detections_to_table
+from utils.utils_image import get_pad_width, rgba2rgb
 
 
-def analyze_one_patch(img, model, dataset_configs, mpp=None, 
-                      compute_masks=True, device=torch.device('cpu')):
+def analyze_one_patch(img, model, dataset_configs, mpp=None, compute_masks=True,):
     h_ori, w_ori = img.shape[1:]
+    model_par0 = next(model.parameters())
+    img = img.to(model_par0.device, model_par0.dtype, non_blocking=True)
+
     ## rescale
     if mpp is not None and mpp != dataset_configs['mpp']:
         scale_factor = dataset_configs['mpp'] / mpp
@@ -35,14 +39,8 @@ def analyze_one_patch(img, model, dataset_configs, mpp=None,
         pad_width = [(0, 0), (0, 0)]
         inputs = img_rescale[None]
 
-    if device.type == 'cpu':  # half precision only supported on CUDA
-        model.float()
-    model.eval()
-    model.to(device)
-
     t0 = time.time()
     with torch.no_grad():
-        inputs = inputs.to(device, next(model.parameters()).dtype, non_blocking=True)
         outputs = model(inputs, compute_masks=compute_masks)[1]
         res = outputs[0]['det']
 
@@ -57,11 +55,24 @@ def analyze_one_patch(img, model, dataset_configs, mpp=None,
     return {'cell_stats': res, 'inference_time': t1-t0}
 
 
+def overlay_masks_on_image(image, mask):
+    msk = Image.fromarray(mask)
+    blended = Image.fromarray(image)
+    blended.paste(msk, mask=msk.split()[-1])
+    
+    return blended
+
+
 def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
-    model = torch.jit.load(args.model)
+    model = torch.jit.load(args.model, map_location='cpu')
     device = torch.device(args.device)
+
+    if device.type == 'cpu':  # half precision only supported on CUDA
+        model.float()
+    model.eval()
+    model.to(device)
 
     meta_info = load_cfg(args.meta_info)
     dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
@@ -80,10 +91,13 @@ def main(args):
         print(patch_path)
         image_id, ext = os.path.splitext(os.path.basename(patch_path))
         # run inference
-        img = read_image(patch_path).type(torch.float32) / 255
+        # img = read_image(patch_path).type(torch.float32) / 255
+        raw_img = rgba2rgb(skimage.io.imread(patch_path))
+        # raw_img = cv2.resize(raw_img, (500, 500), interpolation=cv2.INTER_LINEAR)
+        img = ToTensor()(raw_img)
         outputs = analyze_one_patch(
             img, model, dataset_configs, mpp=args.mpp, 
-            compute_masks=not args.box_only, device=device,
+            compute_masks=not args.box_only,
         )
         print(f"Inference time: {outputs['inference_time']} s")
         res_file = os.path.join(args.output_dir, f"{image_id}_pred.pt")
@@ -96,8 +110,10 @@ def main(args):
             save_masks=not args.box_only, border=3,
             alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
         )
+        export_img = overlay_masks_on_image(raw_img, mask_img)
         img_file = os.path.join(args.output_dir, f"{image_id}_pred{ext}")
-        Image.fromarray(mask_img).save(img_file)
+        export_img.save(img_file)
+        # Image.fromarray(mask_img).save(img_file)
         # write_png((img_mask*255).type(torch.uint8), img_file)
 
         # save to csv

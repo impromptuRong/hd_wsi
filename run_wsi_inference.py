@@ -3,10 +3,12 @@ import time
 import torch
 import argparse
 from PIL import Image
+from openslide import open_slide
 
 import configs as CONFIGS
-from utils_wsi import WholeSlideDataset, yolov5_inference
-from utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table, wsi_imwrite
+from utils.utils_image import Slide
+from utils.utils_wsi import WholeSlideDataset, yolov5_inference, get_slide_and_ann_file, generate_roi_masks
+from utils.utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table, wsi_imwrite
 
 
 def analyze_one_slide(model, dataset, 
@@ -63,11 +65,16 @@ def main(args):
         if not os.path.exists(res_file):
             t0 = time.time()
             try:
-                dataset = WholeSlideDataset(svs_file, masks=args.roi, processor=None, **dataset_configs)
+                osr = Slide(*get_slide_and_ann_file(svs_file))
+                roi_masks = generate_roi_masks(osr, args.roi)
+                dataset = WholeSlideDataset(osr, masks=roi_masks, processor=None, **dataset_configs)
+                osr.attach_reader(open_slide(osr.img_file))
                 print(dataset.info())
-            except:
-                print(f"Failed to load slide {svs_file}")
+            except Exception as e:
+                print(f"Failed to create slide dataset for: {svs_file}.")
+                print(e)
                 continue
+            print(f"Loading slide: {time.time()-t0} s")
             outputs = analyze_one_slide(model, dataset,  
                                         compute_masks=not args.box_only,
                                         batch_size=args.batch_size, 
@@ -88,6 +95,7 @@ def main(args):
                 outputs['cell_stats']['masks'] = output_masks
             else:
                 torch.save(outputs, res_file)
+            osr.detach_reader(close=True)
             print(f"Total time: {time.time()-t0} s")
         else:
             outputs = {}
@@ -141,7 +149,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', required=True, type=str, help="input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="meta info yaml file: contains label texts and colors.")
-    parser.add_argument('--model', default='brca', type=str, help="Model path, torch jit model." )
+    parser.add_argument('--model', default='lung', type=str, help="Model path, torch jit model." )
     parser.add_argument('--output_dir', default='slide_results', type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--roi', default='tissue', type=str, help='ROI region.')

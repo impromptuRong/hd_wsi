@@ -1,0 +1,34 @@
+name: hd_env
+channels:
+  - pytorch
+  - defaults
+  - bioconda
+dependencies:
+  - gobject-introspection=1.68.0=py39he41a700_3
+  - google-auth=2.6.0=pyhd3eb1b0_0
+  - google-auth-oauthlib=0.4.1=py_2
+  - google-pasta=0.2.0=pyhd3eb1b0_0
+  - grpcio=1.42.0=py39hce63b2e_0
+  - libiconv=1.16=h7f8727e_2
+  - openslide=3.4.1=2
+  - pandas=1.4.2=py39h295c915_0
+  - pillow=9.0.1=py39h22f2fdc_0
+  - pip=21.2.4=py39h06a4308_0
+  - python=3.9.12=h12debd9_0
+  - pytorch=1.10.1=py3.9_cuda10.2_cudnn7.6.5_0
+  - seaborn=0.11.2=pyhd3eb1b0_0
+  - scikit-image=0.19.2=py39h51133e4_0
+  - scikit-learn=1.0.2=py39h51133e4_1
+  - scipy=1.7.3=py39hc147768_0
+  - setuptools=61.2.0=py39h06a4308_0
+  - torchvision=0.11.2=py39_cu102
+  - pip:
+    - aiosqlite==0.18.0
+    - databases==0.7.0
+    - fastapi==0.92.0
+    - gdown==4.6.0
+    - jinja2==3.1.2
+    - opencv-python-headless==4.5.5.64
+    - openslide-python==1.1.2
+    - sqlalchemy==1.4.46
+    - uvicorn==0.20.0

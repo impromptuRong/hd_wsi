@@ -1,5 +1,5 @@
 ![QBRC logo](assets/qbrc.jpeg)
-# Histological based Whole Slide Nuclei Segmentation and TME Feature Extraction Pipeline
+# Histological Based Nuclei Segmentation and Tumor Microenvironment Characterization Pipeline
 
 
 ## Introduction
@@ -24,30 +24,34 @@ The third component (`summarize_tme_features.py`) extract nuclei morphological f
 :-------------------------:|:-------------------------:
 ![](assets/sample_tme/images/sample.scatter_img.png)  |  ![](assets/sample_tme/images/sample.density_img.png)
 
-The last component (`deepzoom_server.py`) can either view the results from the second component or do real-time nuclei segmentation on given slides.
+The last component (`app.py`) provides a web interface to view slides and run HD-Yolo. The application will automatically start through docker.
 
 
 ## Installation
-Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI script (`run_wsi_inference.py`) on large dataset. GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 12GB memory for optimized performance. 
+Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI analysis (`run_wsi_inference.py`) on large dataset. GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 16GB memory for optimized performance. 
 
-### Build conda environment
+### Install with conda
 Step 1. Install Anaconda/Miniconda from (https://www.anaconda.com)
 
 Step 2. clone the repo and install the environment:
 ```
 git clone https://github.com/impromptuRong/hd_wsi.git
 cd hd_wsi
-conda env create --prefix /path/to/conda/env/ -f z.ml_env2_1.10.1.yaml
-conda activate /path/to/conda/env/
+conda env create -n hd_env --file environment.yaml
+conda activate hd_env
 ```
 
-Step 3. Load pretrained models. We provide 2 pretrained `HD-Yolo` models for lung cancer and breast cancer. Download the pretrained models from the list below and make sure the paths to these models are consistent with the `MODEL_PATHS` parameters in the `configs.py`.
+Step 3. Download pretrained models. We provide 2 pretrained `HD-Yolo` models for lung cancer and breast cancer. Download the pretrained models from the list below and make sure the paths to these models are consistent with the `MODEL_PATHS` parameters in the `configs.py`.
 <ul>
    <li> <a href="https://drive.google.com/file/d/131RQwmrQeonwuLr46L06gWZ8Jv60opSt/view?usp=share_link">lung cancer model</a> </li>
    <li> <a href="https://drive.google.com/file/d/131zR4g-V1wmjXBhmzuEGnqt-ttzNuSPK/view?usp=share_link">breast cancer model</a> </li>
 </ul>
 
 When using customized model, be sure the [torchscript](https://pytorch.org/docs/stable/jit.html) model will output the results in the format `(losses: Optional, outputs: Dict[str, torch.Tensor])` with required keys: `'boxes'`, `'labels'`, `'scores'`, and optional keys `'masks'`, `'keypoints'`, etc in `outputs`. (See [torchvision MaskRCNN](https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#defining-the-dataset) format for details). 
+
+
+### Install with docker
+Coming Soon.
 
 
 ## User Guideline
@@ -155,21 +159,30 @@ python -u summarize_tme_features.py \
 ```
 
 ### d) Realtime segmentation and Visualize whole slide results
-A deepzoom server is provided for real time segmentation or visualize pre-analyzed results in b). Pre-analyzing the slides and display the results will give better visualization. Realtime version don't need pre-processing, but will generate artifacts and give misleading information on tile borders.
-Example 1: to visualize results tiff images generated in b), run the following:
+A web application is provided to visualize slides and do real time segmentation. The web interface is for demostration purpose only. It's not ready for real product.
+Example 1: start the server by default: 
 ```
-python -u deepzoom_server.py --data_path sample.svs --masks test_wsi/sample.tiff --port=8080
-```
-
-Example 2: start a realtime inference server for the sample slide:
-```
-python -u deepzoom_server.py --data_path sample.svs --model brca --port=8080
+ln -s /path/to/slides slides_folder
+python app.py
 ```
 
-Example 3: start a realtime inference server for a folder of lung cancer slides:
+Example 2: run the server on a different address and port under debug mode:
 ```
-python -u deepzoom_multiserver.py --data_path /path/to/slides/folder --model lung --port=8080
+ln -s /path/to/slides slides_folder
+uvicorn app:app --host 127.0.0.1 --port 5005 --workers 32 --log-level debug --reload
 ```
+
+Example 3: start through docker
+```
+docker run -p 5000:5000 -v `readlink -f slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
+```
+
+The user interface is simple: i). Select a slide, model, and device from the dropdown list; ii). Click the button "Run" to start auto nuclei segmentation; iii). Trigger the slide bar between On/Off to display/hide the results. When entering full screen mode, user can't stop/start the analysis (the top menu will dispear), but can still use the button inside viewer to control whether to display the result. If there are tiles with no results in your current view, use the togger button or slide bar to refresh the cached tiles.
+
+   Start analysis     |    Display masks     |    Full Screen
+:--------------------:|:--------------------:|:--------------------:
+![](assets/web_demo/web_start.png)  |  ![](assets/web_demo/web_display.png)  |  ![](assets/web_demo/web_button.png)
+
 
 
 ## Result files
@@ -181,7 +194,7 @@ python -u deepzoom_multiserver.py --data_path /path/to/slides/folder --model lun
 ### b) Whole slide nuclei detection and segmentation
 1. `slide_id.pt`: The compressed object contains slide information, nuclei locations, scores and types, as well as inference time.
 2. `slide_id.masks.pt`: If model outputs masks and `--box_only` is not enabled, all nuclei masks shrinked into 28x28 pixel are stored in this file.
-3. `slide_id.tiff`: If `--save_img` is enabled, script will plot a large tiff image with the same size as input slide (nuclei color are provided through `--meta_info` with default transparency = 0.3 if not specified). This file can be viewed through [openslide](https://openslide.org) and other tiff viewer. Don't enable this option for large image as it will take extremely long time to plot and save.
+3. `slide_id.tiff`: If `--save_img` is enabled, script will plot a large pyramid tiff image with the same size as input slide (nuclei color are provided through `--meta_info` with default transparency = 0.3). This file can be viewed through [openslide](https://openslide.org) and other tiff viewers. Don't enable this option for large image as it will take extremely long time to plot and save.
 4. `slide_id.csv`: If `--save_csv` is enabled, script will export `boxes`, `scores`, `labels` into this csv file. If `--export_text` is enabled, script will replace numeric labels with text labels defined in `--meta_info`. If `--export_mask` is enabled, an extra column contains masks in polygon format will be added to the csv file. Note that TME feature extraction pipeline takes `slide_id.pt` as input, the csv file is not necessary for downstream analysis. Export csv with text and masks will cost extra time and take more space.
 
 

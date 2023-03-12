@@ -1,8 +1,12 @@
+hd_wsi.v1
+z.quickstart.txt
+cmd.sh
+submit_GPU.sh
 sample.svs
 11170.svs
-submit_GPU.sh
+selected_models
+slides_folder
 sample_features
 sample_results
-selected_models
 __pycache__
 .ipynb_checkpoints

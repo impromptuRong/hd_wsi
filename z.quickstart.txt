@@ -1,5 +1,5 @@
 ## Create a conda environment
-conda env create --prefix /path/to/conda/env/ -f z.ml_env2_1.10.1.yaml
+conda env create -n hd_env --file environment.yaml
 
 ## Run patch segmentation for sample image
 python -u run_patch_inference.py --data_path assets/9388_1_1.png --model lung --output_dir ./
@@ -16,12 +16,17 @@ CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path 11170.svs --mo
 ## Generate results in folder sample_tme
 CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path ./test_wsi --output_dir ./test_features --n_classes 3 --scale_factor 32 --save_images
 
-## Start a server to view original slides and the results
-python -u deepzoom_server.py --data_path 11170.svs --masks 11170_results/11170.tiff --port=8000
+## Start a realtime server by default
+ln -s /path/to/slides slides_folder
+python app.py
 
-## Start a realtime inference server
-CUDA_VISIBLE_DEVICES=0 python -u deepzoom_server.py --data_path 11170.svs --model lung --port=8001
+## Start a realtime server with uvicorn
+uvicorn app:app --host 0.0.0.0 --port 5001 --workers 32 --log-level debug --reload
 
-## Start a realtime server with a folder of slides
-CUDA_VISIBLE_DEVICES=0 python -u deepzoom_multiserver.py --data_path /path/to/slide --model lung --port=8001
-
+## Start a realtime server with docker
+# pull docker from docker hub
+docker pull hd_wsi:latest
+# Or build from scratch
+docker build -t hd_wsi:latest .
+# Run docker
+docker run -p 5000:5000 -v `readlink -f slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest

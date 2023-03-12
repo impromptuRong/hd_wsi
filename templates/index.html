@@ -1,0 +1,166 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>HD-Yolo Slide Viewer</title>
+<meta name="viewport" content="user-scalable=no">
+
+<!-- Modify latest openseadragon to work with png: https://github.com/openseadragon/openseadragon/pull/2075  -->
+
+<head>
+    <link rel="icon" href="{{ url_for('static', path='/images/favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}" type="text/css">
+</head>
+
+<div id="menu">
+    <form id="options" action="{{ url_for('register_model') }}" method="post">
+        <select id="slide", name="slide">
+            <option value="" selected disabled hidden>Choose a slide</option>
+            {% for entry in root_dir.children recursive %}
+                {% if entry.name == curr_slide %}
+                    <option value="{{ url_for('slide', path=entry.url_path) }}" selected="selected">{{ entry.name }}</option>
+                {% else %}
+                    <option value="{{ url_for('slide', path=entry.url_path) }}">{{ entry.name }}</option>
+                {% endif %}
+                {% if entry.children %}
+                    <option>
+                        {{ loop(entry.children) }}
+                    </option>
+                {% endif %}
+            {% endfor %}
+        </select>
+
+        <select id="model", name="model">
+            <option value="" selected disabled hidden>Choose a model</option>
+            {% for model_name in models %}
+                {% if model_name == curr_model %}
+                    <option value="{{ model_name }}", selected="selected">{{ model_name }}</option>
+                {% else %}
+                    <option value="{{ model_name }}">{{ model_name }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+
+        <select id="device", name="device">
+            <option value="" selected disabled hidden>Choose a device</option>
+            {% for device in devices.list %}
+                {% if device == curr_device %}
+                    <option value="{{ device }}", selected="selected">{{ device }}</option>
+                {% else %}
+                    <option value="{{ device }}">{{ device }}</option>
+                {% endif %}
+            {% endfor %}
+        </select>
+
+        <button id="servicebtn" value="{{ url_for('service_control') }}" type="button">Run</button>
+
+        <label class="switch">
+            <input id="nucleislider" value="{{ slide_mpp }}" method="post" type="checkbox">
+            <span class="slider round"></span>
+        </label>
+
+        <label for="coordX">x:</label>
+        <input type="text" id="coordX" class="input-readonly" name="coordX" size="10" readonly>
+        <label for="coordY">y:</label>
+        <input type="text" id="coordY" class="input-readonly" name="coordY" size="10" readonly>
+    </form>
+    <script src="{{ url_for('static', path='/utils.js') }}"></script>
+</div>
+
+
+<div id="view"></div>
+<script type="text/javascript" src="{{ url_for('static', path='/jquery.js') }}"></script>
+<script type="text/javascript" src="{{ url_for('static', path='/openseadragon/openseadragon.js') }}"></script>
+<script type="text/javascript" src="{{ url_for('static', path='/openseadragon/openseadragon-scalebar.js') }}"></script>
+<script type="text/javascript">
+$(function() {
+    /* var dzi_data = {{ dzi_data|default('{}')|safe }}; */
+    var viewer = new OpenSeadragon({
+        id: "view",
+        tileSources: "{{ slide_url }}",
+        prefixUrl: "{{ url_for('static', path='/openseadragon/images/') }}",
+        showNavigator: true,
+        showRotationControl: true,
+        animationTime: 0.5,
+        blendTime: 0.1,
+        constrainDuringPan: true,
+        maxZoomPixelRatio: 2,
+        minZoomImageRatio: 1,
+        visibilityRatio: 1,
+        zoomPerScroll: 2,
+        timeout: 120000,
+    });
+
+    viewer.addTiledImage({
+        tileSource: "{{ masks_url }}",
+        opacity: 0.0,  // start with 0, openseadragon won't pull tiles if it's 0
+        x: 0,
+        y: 0,
+        width: 1,
+    });
+    
+    // display coordinates
+    viewer.addHandler('open', function() {
+        var tracker = new OpenSeadragon.MouseTracker({
+            element: viewer.container,
+            moveHandler: function(event) {
+                if (!viewer.isFullScreen()) {
+                    var webPoint = event.position;
+                    var viewportPoint = viewer.viewport.pointFromPixel(webPoint);
+                    var imagePoint = viewer.world.getItemAt(0).viewportToImageCoordinates(viewportPoint);
+
+                    document.getElementById("coordX").value = imagePoint.x.toFixed(2);
+                    document.getElementById("coordY").value = imagePoint.y.toFixed(2);
+                }
+            }
+        });
+        tracker.setTracking(true);
+    });
+
+    // Control when to display nuclei
+    var mpp = parseFloat("{{ slide_mpp }}");
+
+    let nucleiButton = new OpenSeadragon.Button({
+        tooltip: 'Display Nuclei',
+        id: 'display_nuclei',
+        srcRest: "{{ url_for('static', path='/openseadragon/images/button_rest.png') }}",
+        srcGroup: "{{ url_for('static', path='/openseadragon/images/button_grouphover.png') }}",
+        srcHover: "{{ url_for('static', path='/openseadragon/images/button_hover.png') }}",
+        srcDown: "{{ url_for('static', path='/openseadragon/images/button_pressed.png') }}"
+    });
+    nucleiButton.element.value = document.getElementById("nucleislider").checked;
+    nucleiButton.element.id = 'nucleibtn';
+    nucleiButton.addHandler('click', function(event) {
+        var overlayNuclei = nucleiButton.element.value;
+        nucleiButton.element.value = !overlayNuclei;
+        const btn = document.getElementById("nucleislider");
+        if (btn) { btn.checked = nucleiButton.element.value; }
+
+        displayNuclei(nucleiButton.element.value, mpp=mpp, clearCache=true);
+    });
+    viewer.addControl(nucleiButton.element, { anchor: OpenSeadragon.ControlAnchor.TOP_LEFT });
+
+    // Control display by zoom level
+    viewer.addHandler('zoom', function(event) {
+        var overlayNuclei = nucleiButton.element.value;
+        displayNuclei(overlayNuclei, mpp, clearCache=false);
+    });
+
+    // sync id=toggerbtn after exist full screen
+    viewer.addHandler('full-screen', function(event) {
+        if (!event.fullScreen) {
+            const btn = document.getElementById("nucleislider");
+            btn.checked = nucleiButton.element.value;
+        }
+    });
+
+    // Add a ruler
+    viewer.scalebar({
+        pixelsPerMeter: mpp ? (1e6 / mpp) : 0,
+        xOffset: 10,
+        yOffset: 10,
+        barThickness: 3,
+        color: '#555555',
+        fontColor: '#333333',
+        backgroundColor: 'rgba(255, 255, 255, 0.5)',
+    });
+});
+</script>
