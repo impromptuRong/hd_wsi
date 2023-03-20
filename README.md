@@ -51,7 +51,28 @@ When using customized model, be sure the [torchscript](https://pytorch.org/docs/
 
 
 ### Install with docker
-Coming Soon.
+Step 1. Install [Docker](https://www.docker.com)
+
+Step 2. Download the docker image
+```
+docker pull imprompturong/hd_wsi:latest
+```
+
+Or build docker image from scratch
+```
+docker build -t hd_wsi:latest .
+```
+
+Step 3. Start the docker web interface
+```
+docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
+```
+
+Or use the command line interface
+```
+docker run -dit -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
+docker exec -it hd_wsi /bin/bash
+```
 
 
 ## User Guideline
@@ -174,7 +195,7 @@ uvicorn app:app --host 127.0.0.1 --port 5005 --workers 32 --log-level debug --re
 
 Example 3: start through docker
 ```
-docker run -p 5000:5000 -v `readlink -f slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
+docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
 ```
 
 The user interface is simple: i). Select a slide, model, and device from the dropdown list; ii). Click the button "Run" to start auto nuclei segmentation; iii). Trigger the slide bar between On/Off to display/hide the results. When entering full screen mode, user can't stop/start the analysis (the top menu will dispear), but can still use the button inside viewer to control whether to display the result. If there are tiles with no results in your current view, use the togger button or slide bar to refresh the cached tiles.
@@ -222,7 +243,7 @@ A Deep Learning Approach for Histology-Based Nuclei Segmentation and Tumor Micro
 ## Contact
 If you have any questions or suggestions, please contact the following:
 
-Develpoper: Ruichen Rong (ruichen.rong@utsouthwestern.edu)<br>
+Developer: Ruichen Rong (ruichen.rong@utsouthwestern.edu)<br>
 Maintainer: Hudanyun Sheng (hudanyun.sheng@utsouthwestern.edu)<br>
 Corresponding: Shidan Wang (shidan.wang@utsouthwestern.edu)<br>
 Corresponding: Guanghua Xiao (guanghua.xiao@utsouthwestern.edu)</br>

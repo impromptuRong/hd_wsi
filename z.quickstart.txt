@@ -20,13 +20,13 @@ CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path ./te
 ln -s /path/to/slides slides_folder
 python app.py
 
-## Start a realtime server with uvicorn
+## Start a debug server with uvicorn
 uvicorn app:app --host 0.0.0.0 --port 5001 --workers 32 --log-level debug --reload
 
 ## Start a realtime server with docker
-# pull docker from docker hub
-docker pull hd_wsi:latest
+docker pull imprompturong/hd_wsi:latest
 # Or build from scratch
 docker build -t hd_wsi:latest .
 # Run docker
-docker run -p 5000:5000 -v `readlink -f slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
+docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
+
