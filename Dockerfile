@@ -13,7 +13,7 @@ RUN pip install gdown
 RUN mkdir -p /usr/src/hd_wsi/selected_models/benchmark_lung/
 RUN gdown 131RQwmrQeonwuLr46L06gWZ8Jv60opSt -O /usr/src/hd_wsi/selected_models/benchmark_lung/
 RUN mkdir -p /usr/src/hd_wsi/selected_models/benchmark_nucls_paper/
-RUN gdown 131zR4g-V1wmjXBhmzuEGnqt-ttzNuSPK -O /usr/src/hd_wsi/selected_models/benchmark_lung/
+RUN gdown 131zR4g-V1wmjXBhmzuEGnqt-ttzNuSPK -O /usr/src/hd_wsi/selected_models/benchmark_nucls_paper/
 
 WORKDIR /usr/src/hd_wsi
 # uvicorn app:app --host 0.0.0.0 --port 5001 --workers 32 --log-level debug --reload
