@@ -56,6 +56,7 @@ Step 1. Install [Docker](https://www.docker.com)
 Step 2. Download the docker image
 ```
 docker pull imprompturong/hd_wsi:latest
+docker tag imprompturong/hd_wsi:latest hd_wsi:latest
 ```
 
 Or build docker image from scratch
@@ -70,7 +71,7 @@ docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/
 
 Or use the command line interface
 ```
-docker run -dit -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
+docker run -dit -v /path/to/slides_folder:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
 docker exec -it hd_wsi /bin/bash
 ```
 
