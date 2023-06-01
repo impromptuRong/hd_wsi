@@ -28,7 +28,7 @@ The last component (`app.py`) provides a web interface to view slides and run HD
 
 
 ## Installation
-Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI analysis (`run_wsi_inference.py`) on large dataset. GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 16GB memory for optimized performance. 
+Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI analysis (`run_wsi_inference.py`) on large dataset. For devices with AMD and M1/M2 GPU, please follow [PyTorch Installation](https://pytorch.org/get-started/locally/) to install the correct components. GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 16GB memory for optimized performance. 
 
 ### Install with conda
 Step 1. Install Anaconda/Miniconda from (https://www.anaconda.com)
@@ -69,10 +69,11 @@ Step 3. Start the docker web interface
 docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
 ```
 
-Or use the command line interface
+Or use the command line interface (increase shared memory size either with `--ipc=host` or `--shm-size`)
 ```
-docker run -dit -v /path/to/slides_folder:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
+docker run --gpus all --ipc=host -dit -v /path/to/slides_folder:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
 docker exec -it hd_wsi /bin/bash
+conda activate hd_env
 ```
 
 
@@ -100,12 +101,17 @@ Example 1. Quick start with pretrained breast cancer model on the sample BRCA sl
 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
 ```
 
-Example 2. Detect only box on cpu with the default lung cancer model and export result to csv
+Example 2. Run whole slide inference with lung cancer model under limited computational resources:
+```
+python -u run_wsi_inference.py --data_path sample.svs --model lung --output_dir test_results --save_img --batch_size 4 --num_workers 8 --max_memory 1000
+```
+
+Example 3. Detect only box on cpu with the default lung cancer model and export result to csv
 ```
 python -u run_wsi_inference.py --data_path sample.svs --model_path lung --output_dir test_wsi_box_only --device cpu --box_only --save_csv
 ```
 
-Example 3. Run a customized model on a folder of slides with annotations. Export results to image, and save mask and text information into csv file.
+Example 4. Run a customized model on a folder of slides with annotations. Export results to image, and save mask and text information into csv file.
 ```
 python -u run_wsi_inference.py \
 --data_path /path/to/folder \

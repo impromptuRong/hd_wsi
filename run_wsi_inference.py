@@ -1,21 +1,28 @@
 import os
+import sys
 import time
 import torch
+import psutil
 import argparse
 from PIL import Image
 from openslide import open_slide
 
 import configs as CONFIGS
+from collections import defaultdict
 from utils.utils_image import Slide
-from utils.utils_wsi import WholeSlideDataset, yolov5_inference, get_slide_and_ann_file, generate_roi_masks
+from utils.utils_wsi import WholeSlideDataset, ObjectIterator, yolo_inference_iterator
+from utils.utils_wsi import get_slide_and_ann_file, generate_roi_masks
 from utils.utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table, wsi_imwrite
 
 
-def analyze_one_slide(model, dataset, 
-                      batch_size=64, n_workers=64, 
-                      compute_masks=True, nms_params={}, 
-                      device=torch.device('cpu')):
+# TODO: using multiprocessing.Queue for producer/consumer without IO blocking.
+def analyze_one_slide(model, dataset, batch_size=64, n_workers=64, 
+                      compute_masks=True, nms_params={}, device=torch.device('cpu'), 
+                      export_masks=None, max_mem=None):
+    _byte2mb = lambda x: x / 1e6
+    max_mem = max_mem or _byte2mb(psutil.virtual_memory().free * 0.8)
     input_size = dataset.model_input_size
+    N_patches = len(dataset)
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, 
         num_workers=n_workers, shuffle=False,
@@ -25,12 +32,49 @@ def analyze_one_slide(model, dataset,
     model.eval()
     t0 = time.time()
     print(f"Inferencing: ", end="")
-    res = yolov5_inference(
+    generator = yolo_inference_iterator(
         model, data_loader, 
         input_size=input_size,
         compute_masks=compute_masks, 
         device=device, **nms_params,
     )
+
+    results = defaultdict(list)
+    masks, mask_mem, file_index = [], 0, 0
+    for o in generator:
+        for k, v in o.items():
+            if k != 'masks':
+                results[k].append(v.cpu())
+            else:
+                mask_tensor = v.cpu()
+                masks.append(mask_tensor)
+                mask_mem += _byte2mb(sys.getsizeof(mask_tensor.storage()))
+                avail_mem = min(max_mem, _byte2mb(psutil.virtual_memory().free * 0.8))
+                # print(f"Track memory usage: {mask_mem}, {mask_mem/max_mem}")
+                if export_masks and mask_mem >= avail_mem:
+                    file_index += 1
+                    filename = f"{export_masks}_{file_index:0{len(str(N_patches))}}"
+                    torch.save(torch.cat(masks), filename)
+                    while masks:
+                        ele = masks.pop()
+                        del ele
+                    mask_mem = 0
+    
+    if export_masks and masks:
+        if file_index == 0:
+            filename = export_masks
+        else:
+            file_index += 1
+            filename = f"{export_masks}_{file_index:0{len(str(N_patches))}}"
+        torch.save(torch.cat(masks), filename)
+        while masks:
+            ele = masks.pop()
+            del ele
+            mask_mem = 0
+
+    res = {k: torch.cat(v) for k, v in results.items()}
+    if masks:
+        res['masks'] = torch.cat(masks)
     t1 = time.time()
     print(f"{t1-t0} s")
 
@@ -79,7 +123,10 @@ def main(args):
                                         compute_masks=not args.box_only,
                                         batch_size=args.batch_size, 
                                         n_workers=args.num_workers, 
-                                        nms_params={}, device=device)
+                                        nms_params={}, device=device, 
+                                        export_masks=res_file_masks,
+                                        max_mem=args.max_memory,
+                                       )
             outputs['meta_info'] = meta_info
             outputs['slide_info'] = dataset.slide.info()
             outputs['slide_size'] = dataset.slide_size
@@ -100,17 +147,33 @@ def main(args):
         else:
             outputs = {}
 
+        if args.save_img or args.save_csv:
+            if not outputs:
+                outputs = torch.load(res_file)
+            if args.box_only:
+                param_masks = None
+            else:
+                if 'masks' in outputs['cell_stats']:
+                    param_masks = outputs['cell_stats']['masks']
+                elif os.path.exists(res_file_masks):
+                    param_masks = torch.load(res_file_masks)
+                else:
+                    param_masks = res_file_masks
+        
         if args.save_img:
             img_file = os.path.join(args.output_dir, f"{slide_id}.tiff")
             if not os.path.exists(img_file):
                 print(f"Exporting result to image: ", end="")
                 t0 = time.time()
-                if not outputs:
-                    outputs = torch.load(res_file)
-                    if not args.box_only and os.path.exists(res_file_masks):
-                        outputs['cell_stats']['masks'] = torch.load(res_file_masks)
+                
+                object_iterator = ObjectIterator(
+                    boxes=outputs['cell_stats']['boxes'], 
+                    labels=outputs['cell_stats']['labels'], 
+                    scores=outputs['cell_stats']['scores'], 
+                    masks=param_masks,
+                )
                 mask = export_detections_to_image(
-                    outputs['cell_stats'], outputs['slide_size'], 
+                    object_iterator, outputs['slide_size'], 
                     labels_color=outputs['meta_info']['labels_color'],
                     save_masks=not args.box_only, border=3, 
                     alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
@@ -126,16 +189,19 @@ def main(args):
             if not os.path.exists(csv_file):
                 print(f"Exporting result to csv: ", end="")
                 t0 = time.time()
-                if not outputs:
-                    outputs = torch.load(res_file)
-                    if not args.box_only and os.path.exists(res_file_masks):
-                        outputs['cell_stats']['masks'] = torch.load(res_file_masks)
+
                 if args.export_text and 'labels_text' in outputs['meta_info']:
                     labels_text = outputs['meta_info']['labels_text']
                 else:
                     labels_text = None
+                object_iterator = ObjectIterator(
+                    boxes=outputs['cell_stats']['boxes'], 
+                    labels=outputs['cell_stats']['labels'], 
+                    scores=outputs['cell_stats']['scores'], 
+                    masks=param_masks,
+                )
                 df = export_detections_to_table(
-                    outputs['cell_stats'], 
+                    object_iterator, 
                     labels_text=labels_text,
                     save_masks=(not args.box_only) and args.export_mask,
                 )
@@ -155,6 +221,8 @@ if __name__ == '__main__':
     parser.add_argument('--roi', default='tissue', type=str, help='ROI region.')
     parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
     parser.add_argument('--num_workers', default=64, type=int, help='Number of workers for data loader.')
+    parser.add_argument('--max_memory', default=None, type=int, 
+                        help='Maximum MB to store masks in memory. Default is 80% of free memory.')
     parser.add_argument('--box_only', action='store_true', help="Only save box and ignore mask.")
     parser.add_argument('--save_img', action='store_true', 
                         help="Plot nuclei box/mask into png, don't enable this option for large image.")

@@ -9,11 +9,11 @@ MASK_ALPHA = 0.3
 MODEL_PATHS = {
     'lung': './selected_models/benchmark_lung/lung_best.float16.torchscript.pt',
     'brca': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
-#     'nucls1': './selected_models/benchmark_nucls_paper/fold1_epoch6.float16.torchscript.pt',
-#     'nucls2': './selected_models/benchmark_nucls_paper/fold2_epoch71.float16.torchscript.pt',
-#     'nucls3': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
-#     'nucls4': './selected_models/benchmark_nucls_paper/fold4_epoch102.float16.torchscript.pt',
-#     'nucls5': './selected_models/benchmark_nucls_paper/fold5_epoch127.float16.torchscript.pt',
+    'nucls1': './selected_models/benchmark_nucls_paper/fold1_epoch6.float16.torchscript.pt',
+    'nucls2': './selected_models/benchmark_nucls_paper/fold2_epoch71.float16.torchscript.pt',
+    'nucls3': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
+    'nucls4': './selected_models/benchmark_nucls_paper/fold4_epoch102.float16.torchscript.pt',
+    'nucls5': './selected_models/benchmark_nucls_paper/fold5_epoch127.float16.torchscript.pt',
 }
 
 DATASETS = {

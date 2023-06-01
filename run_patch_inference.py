@@ -11,7 +11,8 @@ from torchvision.transforms import ToTensor
 import skimage.io
 
 import configs as CONFIGS
-from utils.utils_wsi import is_image_file, load_cfg, export_detections_to_image, export_detections_to_table
+from utils.utils_wsi import ObjectIterator, is_image_file, load_cfg
+from utils.utils_wsi import export_detections_to_image, export_detections_to_table
 from utils.utils_image import get_pad_width, rgba2rgb
 
 
@@ -103,9 +104,20 @@ def main(args):
         res_file = os.path.join(args.output_dir, f"{image_id}_pred.pt")
         torch.save(outputs, res_file)
 
+        if 'masks' in outputs['cell_stats']:
+            param_masks = outputs['cell_stats']['masks']
+        else:
+            param_masks = None
+
         # save image
+        object_iterator = ObjectIterator(
+            boxes=outputs['cell_stats']['boxes'], 
+            labels=outputs['cell_stats']['labels'], 
+            scores=outputs['cell_stats']['scores'], 
+            masks=param_masks,
+        )
         mask_img = export_detections_to_image(
-            outputs['cell_stats'], (img.shape[1], img.shape[2]), 
+            object_iterator, (img.shape[1], img.shape[2]), 
             labels_color=dataset_configs['labels_color'],
             save_masks=not args.box_only, border=3,
             alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
@@ -121,8 +133,14 @@ def main(args):
             labels_text = dataset_configs['labels_text']
         else:
             labels_text = None
+        object_iterator = ObjectIterator(
+            boxes=outputs['cell_stats']['boxes'], 
+            labels=outputs['cell_stats']['labels'], 
+            scores=outputs['cell_stats']['scores'], 
+            masks=param_masks,
+        )
         df = export_detections_to_table(
-            outputs['cell_stats'], 
+            object_iterator, 
             labels_text=labels_text,
             save_masks=not args.box_only,
         )

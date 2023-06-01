@@ -39,6 +39,7 @@ from skimage.color import rgb2hsv, hsv2rgb, hed2rgb, rgb2hed, gray2rgb
 # IMAGE_NET_STD_TORCH = np.array([0.225, 0.224, 0.229])
 CHANNEL_AXIS = -1
 SKIMAGE_VERSION = skimage.__version__
+assert SKIMAGE_VERSION >= '0.19'
 
 
 class Processor(object):
@@ -840,11 +841,18 @@ def blur_image(x, method='gaussian', out_dtype='image', *args, **kwargs):
 
 
 def random_blur_whole_image(img, kernel=None):
-    filters = [
-        {'method': 'gaussian', 'sigma': np.random.uniform(low=1, high=8)}, 
-        {'method': 'median', 'selem': skimage.morphology.disk(np.random.randint(4)*2+1)}, 
-        {'method': 'mean', 'selem': skimage.morphology.disk(np.random.randint(4)*2+1)}
-    ]
+    if SKIMAGE_VERSION >= '0.19':
+        filters = [
+            {'method': 'gaussian', 'sigma': np.random.uniform(low=1, high=8)}, 
+            {'method': 'median', 'footprint': skimage.morphology.disk(np.random.randint(4)*2+1)}, 
+            {'method': 'mean', 'footprint': skimage.morphology.disk(np.random.randint(4)*2+1)}
+        ]
+    else:
+        filters = [
+            {'method': 'gaussian', 'sigma': np.random.uniform(low=1, high=8)}, 
+            {'method': 'median', 'selem': skimage.morphology.disk(np.random.randint(4)*2+1)}, 
+            {'method': 'mean', 'selem': skimage.morphology.disk(np.random.randint(4)*2+1)}
+        ]        
     pars = filters[np.random.randint(0, len(filters))]
     
     return blur_image(img, **pars)
@@ -2688,7 +2696,10 @@ class Slide(object):
             mask = np.logical_and(mask, ~exclude_fn(img))
         
         # Dilation, remove small objects and holes
-        mask = skimage.morphology.binary_dilation(mask, selem=skimage.morphology.disk(3))
+        if SKIMAGE_VERSION >= '0.19':
+            mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(3))
+        else:
+            mask = skimage.morphology.binary_dilation(mask, selem=skimage.morphology.disk(3))
         mask = skimage.morphology.remove_small_objects(mask, min_size=min_obj * w_m * h_m)
         mask = skimage.morphology.remove_small_holes(mask, area_threshold=max_hole * w_m * h_m)
 

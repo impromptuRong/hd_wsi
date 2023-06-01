@@ -69,14 +69,17 @@ def main(args):
             mpp_scale = slide_info['mpp']/args.default_mpp
             slide_size = int(math.ceil(slide_size[0] * mpp_scale)), int(math.ceil(slide_size[1] * mpp_scale))
             res_nuclei['boxes'] *= mpp_scale
-            if os.path.exists(res_file_masks):
-                res_nuclei['masks'] = torch.load(res_file_masks)
-            res_nuclei = filter_wsi_results(res_nuclei, n_classes=args.n_classes)
 
             ## Extract nuclei features
+            object_iterator = ObjectIterator(
+                boxes=res_nuclei['boxes'], 
+                labels=res_nuclei['labels'], 
+                scores=res_nuclei['scores'], 
+                masks=None if args.box_only else res_file_masks,
+            )
+            # keep_fn = lambda x: (x['label'] <= args.n_classes) and (x['label'] >= 0),
             nuclei_features = extract_nuclei_features(
-                res_nuclei, box_only=args.box_only, 
-                n_classes=args.n_classes, num_workers=args.num_workers,
+                object_iterator, num_workers=args.num_workers,
             )
             if args.save_nuclei:
                 output_df = {
@@ -95,6 +98,7 @@ def main(args):
             # tmp = nuclei_features.groupby('label').agg(['mean', 'std', 'count'])
 
             ## Generate nuclei_map
+            res_nuclei = filter_wsi_results(res_nuclei, n_classes=args.n_classes)
             nuclei_map, r_ave = generate_nuclei_map(
                 res_nuclei, slide_size=slide_size, 
                 n_classes=args.n_classes, use_scores=False, 
@@ -120,13 +124,13 @@ def main(args):
             density_img = density_plot(cloud_d, scale_factor=1./args.scale_factor)
 
             # load a thumbnail image
+            svs_file = os.path.join(args.data_path, slide_info['img_file'])
             try:
-                svs_file = os.path.join(args.data_path, slide_info['img_file'])
-                xml_file = os.path.join(args.data_path, slide_info['ann_file']) if slide_info['ann_file'] is not None else None
+                xml_file = os.path.join(args.data_path, slide_info['xml_file']) if slide_info['xml_file'] is not None else None
                 slide = Slide(svs_file, xml_file, verbose=False)
                 slide_img = slide.thumbnail((1024, 1024))
             except:
-                print(f"Didn't find the original slide: {slide_info['img_file']}. Will skip slide thumbnail image.")
+                print(f"Didn't find the original slide: {svs_file}. Will skip slide thumbnail image.")
                 slide = None
                 slide_img = None
 
