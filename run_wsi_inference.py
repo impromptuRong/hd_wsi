@@ -85,6 +85,8 @@ def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
     model = torch.jit.load(args.model)
+    if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
+        args.device = 'cpu'
     device = torch.device(args.device)
 
     meta_info = load_cfg(args.meta_info)
