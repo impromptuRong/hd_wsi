@@ -88,6 +88,7 @@ def main(args):
     if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
         args.device = 'cpu'
     device = torch.device(args.device)
+    args.num_workers = min(args.num_workers, os.cpu_count())
 
     meta_info = load_cfg(args.meta_info)
     dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
