@@ -28,7 +28,7 @@ The last component (`app.py`) provides a web interface to view slides and run HD
 
 
 ## Installation
-Dependencies can be installed through conda environment. A GPU device is recommended to run the WSI analysis (`run_wsi_inference.py`) on large dataset. For devices with AMD and M1/M2 GPU, please follow [PyTorch Installation](https://pytorch.org/get-started/locally/) to install the correct components. GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 16GB memory for optimized performance. 
+Dependencies can be installed through conda or docker. A Nvidia GPU device is recommended to run the WSI analysis (`run_wsi_inference.py`) on large dataset. For devices with AMD and M1/M2 GPU, please follow [PyTorch Installation](https://pytorch.org/get-started/locally/) to install the correct components. The required GPU memory depends on the model size and batch size. By default, the `HD-Yolo` model takes 16GB memory for optimized performance. 
 
 ### Install with conda
 Step 1. Install Anaconda/Miniconda from (https://www.anaconda.com)
@@ -254,4 +254,5 @@ If you have any questions or suggestions, please contact the following:
 Developer: Ruichen Rong (ruichen.rong@utsouthwestern.edu)<br>
 Maintainer: Hudanyun Sheng (hudanyun.sheng@utsouthwestern.edu)<br>
 Corresponding: Shidan Wang (shidan.wang@utsouthwestern.edu)<br>
+Corresponding: Xiaowei Zhan (xiaowei.zhan@utsouthwestern.edu)<br>
 Corresponding: Guanghua Xiao (guanghua.xiao@utsouthwestern.edu)</br>
