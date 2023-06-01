@@ -21,6 +21,7 @@ import matplotlib
 import skimage.morphology
 
 from .utils_image import random_sampling_in_polygons, binary_mask_to_polygon, polygon_areas, ObjectProperties
+from .utils_wsi import ObjectIterator
 
 
 """ Nuclei feature codes:
@@ -308,7 +309,7 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
 #     keep = cv2.dnn.NMSBoxes(patches.tolist(), scores.tolist(), score_threshold=score_threshold, 
 #                             nms_threshold=nms_threshold, eta=0.9, top_k=N)
 #     keep = keep.flatten() if len(keep) else []
-
+    # print("******", patches, keep, patches[keep])
     return patches[keep], indices[keep]
 
 
@@ -328,20 +329,21 @@ def _regionprops(box, label, mask):
     return o
 
 
-def extract_nuclei_features(x, box_only=False, n_classes=None, num_workers=None, **kwargs):
+def extract_nuclei_features(object_iterator, num_workers=None, **kwargs):
     """ Extract features from detection results.
         All x, y follow skimage sequence. (opposite to PIL).
         x: row, height. y: col, width.
+        object_iterator: {'boxes', 'labels', 'scores', 'masks'}
     """
-    n_classes = n_classes or int(x['labels'].max().item())
-    if box_only or 'masks' not in x:
-        w = (x['boxes'][:,2] - x['boxes'][:,0] + TO_REMOVE)
-        h = (x['boxes'][:,3] - x['boxes'][:,1] + TO_REMOVE)
-        return {'box_area': (h * w).numpy(), 'labels': x['labels'].numpy()}
+    if object_iterator.masks is None:
+        boxes, labels = object_iterator.boxes, object_iterator.labels
+        w = (boxes[:,2] - boxes[:,0] + TO_REMOVE)
+        h = (boxes[:,3] - boxes[:,1] + TO_REMOVE)
+        return {'box_area': (h * w).numpy(), 'labels': labels.numpy()}
     else:
         # we need a way to vectorize this, pool.starmap is super slow
-        df = [_regionprops(box, label, mask)
-              for box, label, mask in zip(x['boxes'], x['labels'], x['masks'])]
+        df = [_regionprops(obj['box'], obj['label'], obj['mask']) 
+              for obj in object_iterator]
 #         with mp.Pool(num_workers) as pool:
 #             df = pool.starmap(_regionprops, zip(x['boxes'], x['labels'], x['masks']))
 
@@ -525,41 +527,45 @@ def summarize_normalized_features(x, slide_pat_map=None):
     ## Continuous features:
     sigmoid = lambda x: 1 / (1 + np.exp(-x))  # sigmoid function to normalize logit
     # norm: 
+    df2 = {}
     for idx in class_ids:
-        df[f'{idx}.norm'] = df[f'{idx}_{idx}.dot'] ** 0.5
-        df[f'{idx}.norm.logit'] = np.log(df[f'{idx}.norm'])
+        df2[f'{idx}.norm'] = df[f'{idx}_{idx}.dot'] ** 0.5
+        df2[f'{idx}.norm.logit'] = np.log(df2[f'{idx}.norm'])
 
     # projection (direction): df['i_j.proj'] = df['i_j.dot'] / df['j.dot']
     for i, j in itertools.permutations(class_ids, 2):
-        df[f'{i}_{j}.proj'] = df[f'{min(i, j)}_{max(i, j)}.dot'] / df[f'{j}_{j}.dot']
-        df[f'{i}_{j}.proj.logit'] = np.log(df[f'{i}_{j}.proj'])
-        df[f'{i}_{j}.proj.prob'] = sigmoid(df[f'{i}_{j}.proj.logit'])
+        df2[f'{i}_{j}.proj'] = df[f'{min(i, j)}_{max(i, j)}.dot'] / df[f'{j}_{j}.dot']
+        df2[f'{i}_{j}.proj.logit'] = np.log(df2[f'{i}_{j}.proj'])
+        df2[f'{i}_{j}.proj.prob'] = sigmoid(df2[f'{i}_{j}.proj.logit'])
 
     # cosine similarity: df['i_j.cos'] = df['j_j.dot']/df['i.norm']/df['j.norm']
     for i, j in itertools.combinations(class_ids, 2):
         i, j = min(i, j), max(i, j)
-        df[f'{i}_{j}.cos'] = df[f'{i}_{j}.dot']/df[f'{i}.norm']/df[f'{j}.norm']
+        df2[f'{i}_{j}.cos'] = df[f'{i}_{j}.dot']/df2[f'{i}.norm']/df2[f'{j}.norm']
 
     ## Discrete features:
     # nuclei count percentage:
     total_counts = df[[f'{idx}.count' for idx in class_ids]].sum(1)
     for idx in class_ids:
-        df[f'{idx}.count.prob'] = df[f'{idx}.count']/total_counts
+        df2[f'{idx}.count.prob'] = df[f'{idx}.count']/total_counts
 
     # edge marginal percentage: edge_i_j.count/total_edge
     total_edges = df[[f'{i}_{j}.edges.count' for i, j in itertools.combinations_with_replacement(class_ids, 2)]].sum(1)
     for i, j in itertools.combinations_with_replacement(class_ids, 2):
-        df[f'{i}_{j}.edges.marginal.prob'] = df[f'{i}_{j}.edges.count'] / total_edges
+        df2[f'{i}_{j}.edges.marginal.prob'] = df[f'{i}_{j}.edges.count'] / total_edges
 
     # edge conditional probabilities: edge_i_j.count/total_edge_j.count
     for i, j in itertools.permutations(class_ids, 2):
         total_edges_j = df[[f'{min(_, j)}_{max(_, j)}.edges.count' for _ in class_ids]].sum(1)
-        df[f'{i}_{j}.edges.conditional.prob'] = df[f'{min(i, j)}_{max(i, j)}.edges.count']/total_edges_j
+        df2[f'{i}_{j}.edges.conditional.prob'] = df[f'{min(i, j)}_{max(i, j)}.edges.count']/total_edges_j
 
     # dice-coefficient: 2*edge_i_j.count/(total_edge_i.count + total_edge_j.count)
     for i, j in itertools.combinations(class_ids, 2):
         total_edges_i = df[[f'{min(_, i)}_{max(_, i)}.edges.count' for _ in class_ids]].sum(1)
         total_edges_j = df[[f'{min(_, j)}_{max(_, j)}.edges.count' for _ in class_ids]].sum(1)
-        df[f'{i}_{j}.edges.dice'] = 2 * df[f'{i}_{j}.edges.count']/(total_edges_i + total_edges_j)
+        df2[f'{i}_{j}.edges.dice'] = 2 * df[f'{i}_{j}.edges.count']/(total_edges_i + total_edges_j)
 
-    return df
+    # merge data frames
+    df2 = pd.DataFrame.from_dict(df2, orient='columns')
+
+    return pd.concat([df, df2], axis=1)

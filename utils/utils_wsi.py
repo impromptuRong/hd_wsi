@@ -22,6 +22,7 @@ import multiprocessing as mp
 
 import matplotlib
 import tifffile
+from collections import deque
 from matplotlib import pyplot as plt
 from .utils_image import Slide, get_dzi, img_as, pad, Mask, overlay_detections
 
@@ -335,7 +336,7 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
     return res
 
 
-def yolov5_inference(model, data_loader, input_size=640, compute_masks=True, device=torch.device('cuda'), **kwargs):
+def yolo_inference_iterator(model, data_loader, input_size=640, compute_masks=True, device=torch.device('cuda'), **kwargs):
     """ Inference on a whole slide data loader with given model.
         Provide score_threshold and iou_threshold if they are different from default.
     """
@@ -356,34 +357,95 @@ def yolov5_inference(model, data_loader, input_size=640, compute_masks=True, dev
         for images, patch_infos in data_loader:
             images = images.to(device, next(model.parameters()).dtype, non_blocking=True)
             r = batch_inference(model, images, patch_infos, 
-                                input_size=(h, w), compute_masks=True, 
+                                input_size=(h, w), compute_masks=compute_masks, 
                                 score_threshold=score_threshold, 
                                 iou_threshold=iou_threshold)
             for o in r:
-                for k, v in o.items():
-                    results[k].append(v.cpu())
+                yield o
+
+
+def yolov5_inference(model, data_loader, input_size=640, compute_masks=True, device=torch.device('cuda'), **kwargs):
+    """ Inference on a whole slide data loader with given model.
+        Provide score_threshold and iou_threshold if they are different from default.
+    """
+    generator = yolo_inference_iterator(
+        model, data_loader, input_size=input_size, 
+        compute_masks=compute_masks, device=device, **kwargs,
+    )
+    
+    results = defaultdict(list)
+    for o in generator:
+        for k, v in o.items():
+            results[k].append(v.cpu())
 
     return {k: torch.cat(v) for k, v in results.items()}
 
 
-def export_detections_to_table(res, converter=None, labels_text=None, save_masks=True):
-    boxes, labels, scores = res['boxes'], res['labels'], res['scores']
-    if 'masks' in res and save_masks:
-        masks = res['masks']
+class ObjectIterator(object):
+    def __init__(self, boxes, labels, scores=None, masks=None, keep_fn=None):
+        self.boxes = boxes
+        self.labels = labels
+        self.scores = scores if scores is not None else [None] * len(boxes)
+        self.keep_fn = keep_fn  # a function to filter out invalid entry
+        # given a file
+        if isinstance(masks, str):
+            folder, file_prefix = os.path.split(masks)
+            file_chunks = [_ for _ in os.listdir(folder) 
+                           if _.startswith(file_prefix) and not _.startswith('.')]
+            if file_chunks:
+                self.partitions = [
+                    os.path.join(folder, filename) 
+                    for filename in sorted(file_chunks, reverse=True)
+                ]
+                self.masks = deque()
+            else:
+                self.partitions = None
+                self.masks = None
+        elif isinstance(masks, torch.Tensor):
+            self.partitions = []
+            self.masks = deque(masks)
+        else:
+            self.partitions = None
+            self.masks = None
+
+    def __len__(self):
+        return len(self.boxes)
+    
+    def __iter__(self):
+        for box, label, score in zip(self.boxes, self.labels, self.scores):
+            obj = {'box': box, 'label': label, 'score': score, 
+                   'mask': self._get_next_mask()}
+            if self.keep_fn is None or self.keep_fn(obj):
+                yield obj
+    
+    def _get_next_mask(self):
+        if self.masks is None:
+            return None
+
+        if not self.masks:
+            filename = self.partitions.pop()
+            self.masks = deque(torch.load(filename))
+
+        return self.masks.popleft()
+
+
+def export_detections_to_table(object_iterator, converter=None, labels_text=None, save_masks=True):
+    # boxes, labels, scores = res['boxes'], res['labels'], res['scores']
+    if save_masks:
         columns = ['x0', 'y0', 'x1', 'y1', 'score', 'label', 'poly_x', 'poly_y',]
     else:
-        masks = [None] * len(boxes)
         columns = ['x0', 'y0', 'x1', 'y1', 'score', 'label',]
 
     df = []
-    for box, score, label, mask in zip(boxes, scores, labels, masks):
+    for obj in object_iterator:
+        box, label, score, mask = obj['box'], obj['label'], obj['score'], obj['mask']
         box = box.round().to(torch.int32)
         w = max((box[2] - box[0] + TO_REMOVE).item(), 1)
         h = max((box[3] - box[1] + TO_REMOVE).item(), 1)
         label = label.item() if labels_text is None else labels_text.get(label.item(), f'cls_{label.item()}')
         entry = box.tolist() + [round(score.item(), 4), label]
 
-        if mask is not None:
+        if save_masks and mask is not None:
             # mask = F.interpolate(mask[None].float(), size=(h, w), mode="bilinear", align_corners=False)[0][0]
             mask = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR)
             mask = Mask(mask > 0.5, size=[h, w], mode='mask').poly()
@@ -400,14 +462,14 @@ def export_detections_to_table(res, converter=None, labels_text=None, save_masks
     return pd.DataFrame(df, columns=columns)
 
 
-def export_detections_to_image(res, img_size, labels_color, save_masks=True, border=3, alpha=1.0):
+def export_detections_to_image(object_iterator, img_size, labels_color, save_masks=True, border=3, alpha=1.0):
     h_s, w_s = img_size
-    boxes, labels = res['boxes'], res['labels']
-    if not len(labels):  # empty results
+    # boxes, labels = res['boxes'], res['labels']
+    if not len(object_iterator):  # empty results
         return np.zeros((h_s, w_s, 4), dtype=np.uint8)
 
-    masks = res['masks'] if ('masks' in res and save_masks) else [None] * len(boxes)
-    max_val = int(labels.max())
+    # masks = res['masks'] if ('masks' in res and save_masks) else [None] * len(boxes)
+    max_val = int(object_iterator.labels.max())
     color_tensor = torch.zeros((max_val + 1 + 1, 4), dtype=torch.uint8)
     for k, v in labels_color.items():
         if k > 0 and k <= max_val:
@@ -417,7 +479,8 @@ def export_detections_to_image(res, img_size, labels_color, save_masks=True, bor
     color_tensor[..., -1] = color_tensor[..., -1] * alpha  # apply extra transparency
 
     img_label = torch.zeros((h_s, w_s), dtype=torch.int)
-    for box, label, mask in zip(boxes, labels, masks):
+    for obj in object_iterator:
+        box, label, _, mask = obj['box'], obj['label'], obj['score'], obj['mask']
         b_0, b_1, b_2, b_3 = box.round().to(torch.int32)
         w = max((b_2 - b_0 + TO_REMOVE).item(), 1)
         h = max((b_3 - b_1 + TO_REMOVE).item(), 1)
@@ -428,7 +491,7 @@ def export_detections_to_image(res, img_size, labels_color, save_masks=True, bor
 
         if label > 0 and x_0 < x_1 and y_0 < y_1:  # ignore unclassified and out of bounds
             col_label = (label.item() if label > 0 else max_val + 1)
-            if mask is not None:  # draw mask
+            if save_masks and mask is not None:  # draw mask
                 if isinstance(mask, list):  # we got a polygon
                     mask_obj = np.zeros((h, w))
                     cv2.fillPoly(mask_obj, pts=[_.astype(np.int32)-np.array([b_0, b_1]) for _ in mask], color=col_label)
