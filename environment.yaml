@@ -30,5 +30,6 @@ dependencies:
     - jinja2==3.1.2
     - opencv-python-headless==4.5.5.64
     - openslide-python==1.1.2
+    - psutil==5.9.5
     - sqlalchemy==1.4.46
     - uvicorn==0.20.0
