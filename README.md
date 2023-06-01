@@ -69,9 +69,9 @@ Step 3. Start the docker web interface
 docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
 ```
 
-Or use the command line interface (increase shared memory size either with `--ipc=host` or `--shm-size`)
+Or use the command line interface (increase shared memory size either with `--ipc=host` or `--shm-size`, use `--gpus all` to enable multiple gpu cards if needed.)
 ```
-docker run --gpus all --ipc=host -dit -v /path/to/slides_folder:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
+docker run --ipc=host -dit -v /path/to/slides_folder:/usr/src/hd_wsi/slides_folder --name hd_wsi hd_wsi:latest
 docker exec -it hd_wsi /bin/bash
 conda activate hd_env
 ```
@@ -238,12 +238,13 @@ The user interface is simple: i). Select a slide, model, and device from the dro
 ## Citation
 A Deep Learning Approach for Histology-Based Nuclei Segmentation and Tumor Microenvironment Characterization
 ``` 
-@article{rong2022deep,
-  title={A Deep Learning Approach for Histology-Based Nuclei Segmentation and Tumor Microenvironment Characterization},
+@article{rong2023deep,
+  title={A Deep Learning Approach for Histology-Based Nucleus Segmentation and Tumor Microenvironment Characterization},
   author={Rong, Ruichen and Sheng, Hudanyun and Jin, Kevin W and Wu, Fangjiang and Luo, Danni and Wen, Zhuoyu and Tang, Chen and Yang, Donghan M and Jia, Liwei and Amgad, Mohamed and others},
-  journal={bioRxiv},
-  year={2022},
-  publisher={Cold Spring Harbor Laboratory}
+  journal={Modern Pathology},
+  pages={100196},
+  year={2023},
+  publisher={Elsevier}
 }
 ```
 
