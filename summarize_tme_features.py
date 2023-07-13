@@ -126,7 +126,8 @@ def main(args):
             # load a thumbnail image
             svs_file = os.path.join(args.data_path, slide_info['img_file'])
             try:
-                xml_file = os.path.join(args.data_path, slide_info['xml_file']) if slide_info['xml_file'] is not None else None
+                xml_file = slide_info.get('xml_file') 
+                xml_file = os.path.join(args.data_path, xml_file) if xml_file is not None else None
                 slide = Slide(svs_file, xml_file, verbose=False)
                 slide_img = slide.thumbnail((1024, 1024))
             except:
