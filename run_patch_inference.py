@@ -11,7 +11,8 @@ from torchvision.transforms import ToTensor
 import skimage.io
 
 import configs as CONFIGS
-from utils.utils_wsi import ObjectIterator, is_image_file, load_cfg
+from utils.utils_wsi import ObjectIterator
+from utils.utils_wsi import load_cfg, load_hdyolo_model, is_image_file
 from utils.utils_wsi import export_detections_to_image, export_detections_to_table
 from utils.utils_image import get_pad_width, rgba2rgb
 
@@ -67,27 +68,31 @@ def overlay_masks_on_image(image, mask):
 def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
-    model = torch.jit.load(args.model, map_location='cpu')
-    if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
-        args.device = 'cpu'
+    print("==============================")
+    model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
     device = torch.device(args.device)
-
+    
     if device.type == 'cpu':  # half precision only supported on CUDA
         model.float()
     model.eval()
     model.to(device)
+    print(f"Load model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
 
     meta_info = load_cfg(args.meta_info)
     dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+    print(f"Dataset configs: {dataset_configs}")
 
     if os.path.isdir(args.data_path):
         patch_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
                        if is_image_file(_)]
     else:
         patch_files = [args.data_path]
+    print(f"Inputs: {args.data_path} ({len(patch_files)} files observed). ")
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    print(f"Outputs: {args.output_dir}")
+    print("==============================")
 
     for patch_path in patch_files:
         print("==============================")

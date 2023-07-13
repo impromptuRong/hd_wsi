@@ -10,9 +10,10 @@ from openslide import open_slide
 import configs as CONFIGS
 from collections import defaultdict
 from utils.utils_image import Slide
-from utils.utils_wsi import WholeSlideDataset, ObjectIterator, yolo_inference_iterator
+from utils.utils_wsi import ObjectIterator, WholeSlideDataset
 from utils.utils_wsi import get_slide_and_ann_file, generate_roi_masks
-from utils.utils_wsi import load_cfg, export_detections_to_image, export_detections_to_table, wsi_imwrite
+from utils.utils_wsi import load_cfg, load_hdyolo_model, yolo_inference_iterator
+from utils.utils_wsi import export_detections_to_image, export_detections_to_table, wsi_imwrite
 
 
 # TODO: using multiprocessing.Queue for producer/consumer without IO blocking.
@@ -84,23 +85,26 @@ def analyze_one_slide(model, dataset, batch_size=64, n_workers=64,
 def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
-    model = torch.jit.load(args.model)
-    if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
-        args.device = 'cpu'
+    print("==============================")
+    model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
     device = torch.device(args.device)
-    args.num_workers = min(args.num_workers, os.cpu_count())
+    print(f"Load model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
 
     meta_info = load_cfg(args.meta_info)
     dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
+    print(f"Dataset configs: {dataset_configs}")
 
     if os.path.isdir(args.data_path):
         slide_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
                        if not _.startswith('.') and _.endswith('.svs')]
     else:
         slide_files = [args.data_path]
+    print(f"Inputs: {args.data_path} ({len(slide_files)} files observed). ")
+
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+    print(f"Outputs: {args.output_dir}")
+    print("==============================")
 
     for slide_file in slide_files:
         svs_file = os.path.join(slide_file)
@@ -225,7 +229,7 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
     parser.add_argument('--num_workers', default=64, type=int, help='Number of workers for data loader.')
     parser.add_argument('--max_memory', default=None, type=int, 
-                        help='Maximum MB to store masks in memory. Default is 80% of free memory.')
+                        help='Maximum MB to store masks in memory. Default is 80%% of free memory.')
     parser.add_argument('--box_only', action='store_true', help="Only save box and ignore mask.")
     parser.add_argument('--save_img', action='store_true', 
                         help="Plot nuclei box/mask into png, don't enable this option for large image.")

@@ -30,8 +30,10 @@ from sqlalchemy.ext.asyncio import create_async_engine
 # from sqlalchemy import create_engine
 
 import configs as hd_cfg
-from utils.utils_wsi import WholeSlideDataset, get_slide_and_ann_file, generate_roi_masks, load_cfg
-from utils.utils_wsi import batch_inference, export_detections_to_table, export_detections_to_image
+from utils.utils_wsi import ObjectIterator, WholeSlideDataset
+from utils.utils_wsi import get_slide_and_ann_file, generate_roi_masks
+from utils.utils_wsi import load_cfg, load_hdyolo_model, batch_inference
+from utils.utils_wsi import export_detections_to_image, export_detections_to_table, wsi_imwrite
 from utils.utils_image import Slide
 from utils.deepzoom import DeepZoomGenerator
 
@@ -104,7 +106,8 @@ class Runner(object):
         
         self.name = name
         if isinstance(model, str):
-            model = torch.jit.load(model, map_location='cpu')
+            model = load_hdyolo_model(model, nms_params=hd_cfg.NMS_PARAMS)
+            print(model.headers.det.nms_params)
         elif isinstance(model, bentoml.Model):
             model = model.info.imported_module.load_model(model)
         self.model: torch.ScriptModule = model
@@ -349,8 +352,14 @@ class Service(object):
             res = {**app.service._cache[tile_key]}
             res['boxes'] = res['boxes'] - torch.tensor([x0, y0, x0, y0])
             if res is not None and len(res['boxes']):
+                object_iterator = ObjectIterator(
+                    boxes=res['boxes'], 
+                    labels=res['labels'], 
+                    scores=res['scores'], 
+                    masks=res['masks'] if 'masks' in res else None,
+                )
                 mask_img = export_detections_to_image(
-                    res, (h_roi, w_roi), 
+                    object_iterator, (h_roi, w_roi), 
                     app.dataset_configs['labels_color'],
                     save_masks=True, border=3, alpha=settings.mask_opacity)
                 mask_img = Image.fromarray(mask_img)
@@ -568,7 +577,7 @@ async def index(request: Request):
 
 @app.post("/models")
 async def register_model(model: str = '', device: str = 'cpu'):
-    if device != 'cpu' and torch.cuda.mem_get_info(device)[0]/1e9 > 8.:  # require 8 gb memory
+    if device != 'cpu' and torch.cuda.mem_get_info(device)[0]/1e8 > 8.:  # require 8 gb memory
         app.device = device
 
     if model:

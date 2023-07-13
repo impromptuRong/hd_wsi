@@ -38,8 +38,6 @@ def main(args):
         if not os.path.exists(img_foldername):
             os.makedirs(img_foldername)
 
-    if not torch.cuda.is_available() or torch.cuda.device_count() < 1:
-        args.device = 'cpu'
     device = torch.device(args.device)
     for filename in res_files:
         slide_id = os.path.splitext(filename)[0]

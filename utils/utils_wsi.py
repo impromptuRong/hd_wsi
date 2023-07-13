@@ -41,6 +41,19 @@ def load_cfg(cfg):
     return yaml
 
 
+def load_hdyolo_model(model_path, nms_params={}):
+    model = torch.jit.load(model_path, map_location='cpu')
+    model.eval()
+    # update nms_params based on config file
+    new_nms_params = {
+        k: nms_params.get(k, v)
+        for k, v in model.headers.det.nms_params.items()
+    }
+    model.headers.det.nms_params = new_nms_params
+
+    return model
+
+
 def collate_fn(batch):
     return tuple(zip(*batch))
 
