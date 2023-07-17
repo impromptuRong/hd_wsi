@@ -129,7 +129,7 @@ def main(args):
                 xml_file = slide_info.get('xml_file') 
                 xml_file = os.path.join(args.data_path, xml_file) if xml_file is not None else None
                 slide = Slide(svs_file, xml_file, verbose=False)
-                slide_img = slide.thumbnail((1024, 1024))
+                slide_img = slide.thumbnail((2048, 2048))
             except:
                 print(f"Didn't find the original slide: {svs_file}. Will skip slide thumbnail image.")
                 slide = None

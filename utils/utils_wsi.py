@@ -124,14 +124,16 @@ class WholeSlideDataset(torch.utils.data.Dataset):
         self.processor = processor
         self.kwargs = kwargs
 
-        if osr.mpp != mpp:  # we use mpp instead of magnitude
+        if osr.mpp is not None and osr.mpp != mpp:  # we use mpp instead of magnitude
             self.window_size = int(round(self.patch_size * mpp/osr.mpp / 64) * 64)
             self.scale = self.patch_size / self.window_size
             self.window_padding = int(self.padding / self.scale)
+            self.run_mpp = self.slide.mpp/self.scale
         else:
             self.scale = 1.0
             self.window_size = self.patch_size
             self.window_padding = self.padding
+            self.run_mpp = mpp
 
         tiles, _, poly_indices, (row_id, col_id) = osr.whole_slide_scanner(
             self.window_size, self.page, masks=self.masks, coverage_threshold=1e-8,
@@ -214,7 +216,7 @@ class WholeSlideDataset(torch.utils.data.Dataset):
 
     def info(self):
         slide_info = f"{self.slide_id}: {self.slide.magnitude}x"
-        mpp_info = f"mpp: {self.slide.mpp}->{self.slide.mpp/self.scale}"
+        mpp_info = f"mpp: {self.slide.mpp}->{self.run_mpp}"
         inference_size = [math.ceil(self.slide_size[0] * self.scale), 
                           math.ceil(self.slide_size[1] * self.scale)]
         size_info = f"size: {self.slide_size}->{inference_size}"

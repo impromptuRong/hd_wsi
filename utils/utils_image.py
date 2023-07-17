@@ -2490,7 +2490,7 @@ class Slide(object):
                         continue
                     if page.tilewidth == 0 or page.tilelength == 0:
                         continue
-                    h, w, _ = page.shape
+                    h, w = page.shape[0], page.shape[1]
                     if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
                         level_dims.append((w, h))
                         scales.append(level_dims[0][0]/w)
