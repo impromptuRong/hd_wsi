@@ -11,7 +11,7 @@ from torchvision.transforms import ToTensor
 import skimage.io
 
 import configs as CONFIGS
-from utils.utils_wsi import ObjectIterator
+from utils.utils_wsi import ObjectIterator, folder_iterator
 from utils.utils_wsi import load_cfg, load_hdyolo_model, is_image_file
 from utils.utils_wsi import export_detections_to_image, export_detections_to_table
 from utils.utils_image import get_pad_width, rgba2rgb
@@ -83,10 +83,13 @@ def main(args):
     print(f"Dataset configs: {dataset_configs}")
 
     if os.path.isdir(args.data_path):
-        patch_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
-                       if is_image_file(_)]
+        keep_fn = lambda x: is_image_file(x)
+        patch_files = list(folder_iterator(args.data_path, keep_fn))
+#         patch_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
+#                        if is_image_file(_)]
     else:
-        patch_files = [args.data_path]
+        rel_path = os.path.basename(args.data_path)
+        patch_files = [(0, rel_path, args.data_path)]
     print(f"Inputs: {args.data_path} ({len(patch_files)} files observed). ")
 
     if not os.path.exists(args.output_dir):
@@ -94,9 +97,12 @@ def main(args):
     print(f"Outputs: {args.output_dir}")
     print("==============================")
 
-    for patch_path in patch_files:
+    for file_idx, rel_path, patch_path in patch_files:
         print("==============================")
         print(patch_path)
+        output_dir = os.path.join(args.output_dir, os.path.dirname(rel_path))
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         image_id, ext = os.path.splitext(os.path.basename(patch_path))
         # run inference
         # img = read_image(patch_path).type(torch.float32) / 255
@@ -108,7 +114,7 @@ def main(args):
             compute_masks=not args.box_only,
         )
         print(f"Inference time: {outputs['inference_time']} s")
-        res_file = os.path.join(args.output_dir, f"{image_id}_pred.pt")
+        res_file = os.path.join(output_dir, f"{image_id}_pred.pt")
         torch.save(outputs, res_file)
 
         if 'masks' in outputs['cell_stats']:
@@ -130,7 +136,7 @@ def main(args):
             alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
         )
         export_img = overlay_masks_on_image(raw_img, mask_img)
-        img_file = os.path.join(args.output_dir, f"{image_id}_pred{ext}")
+        img_file = os.path.join(output_dir, f"{image_id}_pred{ext}")
         export_img.save(img_file)
         # Image.fromarray(mask_img).save(img_file)
         # write_png((img_mask*255).type(torch.uint8), img_file)
@@ -151,7 +157,7 @@ def main(args):
             labels_text=labels_text,
             save_masks=not args.box_only,
         )
-        csv_file = os.path.join(args.output_dir, f"{image_id}_pred.csv")
+        csv_file = os.path.join(output_dir, f"{image_id}_pred.csv")
         df.to_csv(csv_file, index=False)
         print("==============================")
 
@@ -161,7 +167,7 @@ if __name__ == '__main__':
     parser.add_argument('--data_path', required=True, type=str, help="Input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="A yaml file contains: label texts and colors.")
-    parser.add_argument('--model', default='brca', type=str, help="Model path, torch jit model." )
+    parser.add_argument('--model', default='lung', type=str, help="Model path, torch jit model." )
     parser.add_argument('--output_dir', default='patch_results', type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--mpp', default=None, type=float, help='Input data mpp.')

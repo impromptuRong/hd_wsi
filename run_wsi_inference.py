@@ -10,7 +10,7 @@ from openslide import open_slide
 import configs as CONFIGS
 from collections import defaultdict
 from utils.utils_image import Slide
-from utils.utils_wsi import ObjectIterator, WholeSlideDataset
+from utils.utils_wsi import ObjectIterator, WholeSlideDataset, folder_iterator
 from utils.utils_wsi import get_slide_and_ann_file, generate_roi_masks
 from utils.utils_wsi import load_cfg, load_hdyolo_model, yolo_inference_iterator
 from utils.utils_wsi import export_detections_to_image, export_detections_to_table, wsi_imwrite
@@ -95,34 +95,36 @@ def main(args):
     print(f"Dataset configs: {dataset_configs}")
 
     if os.path.isdir(args.data_path):
-        slide_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
-                       if not _.startswith('.') and _.endswith('.svs')]
+        keep_fn = lambda x: os.path.splitext(x)[1] in ['.svs', '.tiff']
+        slide_files = list(folder_iterator(args.data_path, keep_fn))
+#         slide_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
+#                        if not _.startswith('.') and _.endswith('.svs')]
     else:
-        slide_files = [args.data_path]
+        rel_path = os.path.basename(args.data_path)
+        slide_files = [(0, rel_path, args.data_path)]
     print(f"Inputs: {args.data_path} ({len(slide_files)} files observed). ")
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
     print(f"Outputs: {args.output_dir}")
     print("==============================")
 
-    for slide_file in slide_files:
-        svs_file = os.path.join(slide_file)
+    for file_idx, rel_path, slide_file in slide_files:
+        output_dir = os.path.join(args.output_dir, os.path.dirname(rel_path))
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
         slide_id = os.path.splitext(os.path.basename(slide_file))[0]
-        res_file = os.path.join(args.output_dir, f"{slide_id}.pt")
-        res_file_masks = os.path.join(args.output_dir, f"{slide_id}.masks.pt")
+        res_file = os.path.join(output_dir, f"{slide_id}.pt")
+        res_file_masks = os.path.join(output_dir, f"{slide_id}.masks.pt")
 
         print("==============================")
         if not os.path.exists(res_file):
             t0 = time.time()
             try:
-                osr = Slide(*get_slide_and_ann_file(svs_file))
+                osr = Slide(*get_slide_and_ann_file(slide_file))
                 roi_masks = generate_roi_masks(osr, args.roi)
                 dataset = WholeSlideDataset(osr, masks=roi_masks, processor=None, **dataset_configs)
                 osr.attach_reader(open_slide(osr.img_file))
                 print(dataset.info())
             except Exception as e:
-                print(f"Failed to create slide dataset for: {svs_file}.")
+                print(f"Failed to create slide dataset for: {slide_file}.")
                 print(e)
                 continue
             print(f"Loading slide: {time.time()-t0} s")
@@ -168,7 +170,7 @@ def main(args):
                     param_masks = res_file_masks
         
         if args.save_img:
-            img_file = os.path.join(args.output_dir, f"{slide_id}.tiff")
+            img_file = os.path.join(output_dir, f"{slide_id}.tiff")
             if not os.path.exists(img_file):
                 print(f"Exporting result to image: ", end="")
                 t0 = time.time()
@@ -192,7 +194,7 @@ def main(args):
                 print(f"{time.time()-t0} s")
 
         if args.save_csv:
-            csv_file = os.path.join(args.output_dir, f"{slide_id}.csv")
+            csv_file = os.path.join(output_dir, f"{slide_id}.csv")
             if not os.path.exists(csv_file):
                 print(f"Exporting result to csv: ", end="")
                 t0 = time.time()

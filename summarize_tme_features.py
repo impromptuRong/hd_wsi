@@ -6,6 +6,7 @@ import glob
 from collections import Counter
 from utils.utils_features import *
 from utils.utils_image import Slide
+from utils.utils_wsi import folder_iterator
 
 SEED = 42
 SCALE_FACTOR = 32
@@ -16,15 +17,15 @@ def main(args):
     assert os.path.exists(args.model_res_path), f"{args.model_res_path} does not exists."
     if os.path.isdir(args.model_res_path):
         res_folder = args.model_res_path
-        res_files = [_ for _ in os.listdir(args.model_res_path) 
-                     if not _.startswith('.') and _.endswith('.pt') and not _.endswith('.masks.pt')]
+        keep_fn = lambda x: not x.startswith('.') and x.endswith('.pt') and not x.endswith('.masks.pt')
+        res_files = list(folder_iterator(args.model_res_path, keep_fn=keep_fn))
+        # res_files = [_ for _ in os.listdir(args.model_res_path) 
+        #              if not _.startswith('.') and _.endswith('.pt') and not _.endswith('.masks.pt')]
     else:
         res_folder, res_file = os.path.split(args.model_res_path)
-        res_files = [res_file]
+        # rel_path = os.path.basename(args.model_res_path)
+        res_files = [(0, res_file, args.model_res_path)]
     assert len(res_files), f"Missing result files (.pt) in {args.model_res_path}."
-
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
 
     pkl_filename = os.path.join(args.output_dir, "feature_summary.pkl")
     if os.path.exists(pkl_filename):
@@ -33,14 +34,13 @@ def main(args):
     else:
         outputs = {}
 
-    if args.save_images:
-        img_foldername = os.path.join(args.output_dir, "images")
-        if not os.path.exists(img_foldername):
-            os.makedirs(img_foldername)
-
     device = torch.device(args.device)
-    for filename in res_files:
-        slide_id = os.path.splitext(filename)[0]
+    for file_idx, rel_path, res_path in res_files:
+        output_dir = os.path.join(args.output_dir, os.path.dirname(rel_path))
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+
+        slide_id = os.path.splitext(rel_path)[0]
         print("==============================")
         print(slide_id)
 
@@ -144,16 +144,16 @@ def main(args):
 
             if args.save_images:
                 if slide_img is not None:
-                    save_path = os.path.join(img_foldername, f"{slide_id}.slide_img.png")
+                    save_path = os.path.join(args.output_dir, f"{slide_id}.slide_img.png")
                     skimage.io.imsave(save_path, (slide_img*255.0).astype(np.uint8))
 
-                save_path = os.path.join(img_foldername, f"{slide_id}.scatter_img.png")
+                save_path = os.path.join(args.output_dir, f"{slide_id}.scatter_img.png")
                 skimage.io.imsave(save_path, (scatter_img*255.0).astype(np.uint8))
 
-                save_path = os.path.join(img_foldername, f"{slide_id}.density_img.png")
+                save_path = os.path.join(args.output_dir, f"{slide_id}.density_img.png")
                 skimage.io.imsave(save_path, (density_img*255.0).astype(np.uint8))
 
-                save_path = os.path.join(img_foldername, f"{slide_id}.roi_mask.png")
+                save_path = os.path.join(args.output_dir, f"{slide_id}.roi_mask.png")
                 skimage.io.imsave(save_path, (roi_mask*255.0).astype(np.uint8))
 
             print({k: (v if isinstance(v, numbers.Number) else f'len={len(v)}')

@@ -63,6 +63,19 @@ def is_image_file(x):
     return not x.startswith('.') and ext in ['.png', '.jpeg', '.jpg', '.tif', '.tiff']
 
 
+def folder_iterator(folder, keep_fn=None):
+    file_idx = -1
+    for root, dirs, files in os.walk(folder):
+        for file in files:
+            if keep_fn is not None and not keep_fn(file):
+                continue
+            file_idx += 1
+            file_path = os.path.join(root, file)
+            rel_path = os.path.relpath(file_path, folder)
+
+            yield file_idx, rel_path, file_path
+
+
 def get_slide_and_ann_file(svs_file, ann_file=None):
     folder_name, file_name = os.path.split(svs_file)
     slide_id, ext = os.path.splitext(file_name)
