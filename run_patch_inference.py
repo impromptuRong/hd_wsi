@@ -70,6 +70,9 @@ def main(args):
         args.model = CONFIGS.MODEL_PATHS[args.model]
     print("==============================")
     model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print(f"Cuda is not available, use cpu instead.")
+        args.device = 'cpu'
     device = torch.device(args.device)
     
     if device.type == 'cpu':  # half precision only supported on CUDA
@@ -85,8 +88,6 @@ def main(args):
     if os.path.isdir(args.data_path):
         keep_fn = lambda x: is_image_file(x)
         patch_files = list(folder_iterator(args.data_path, keep_fn))
-#         patch_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
-#                        if is_image_file(_)]
     else:
         rel_path = os.path.basename(args.data_path)
         patch_files = [(0, rel_path, args.data_path)]

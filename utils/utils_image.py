@@ -2083,7 +2083,7 @@ def overlay_detections(ax, bboxes=None, labels=None, masks=None, scores=None,
     if labels_color is None:  # give unique color to each type
         unique_labels = np.unique(labels)
         _cmap = default_color_palette(n_colors=len(unique_labels))
-        palette = {label: color for label, color in enumerate(unique_labels, _cmap)}
+        palette = {label: color for label, color in zip(unique_labels, _cmap)}
         color_array = [palette[label] for label in labels]
     elif isinstance(labels_color, str) and labels_color.startswith('object'):
         color_array = default_color_palette(n_colors=len(labels))

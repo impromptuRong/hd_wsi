@@ -87,7 +87,15 @@ def main(args):
         args.model = CONFIGS.MODEL_PATHS[args.model]
     print("==============================")
     model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
+    if args.device == 'cuda' and not torch.cuda.is_available():
+        print(f"Cuda is not available, use cpu instead.")
+        args.device = 'cpu'
     device = torch.device(args.device)
+    
+    if device.type == 'cpu':  # half precision only supported on CUDA
+        model.float()
+    model.eval()
+    model.to(device)
     print(f"Load model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
 
     meta_info = load_cfg(args.meta_info)
@@ -97,8 +105,6 @@ def main(args):
     if os.path.isdir(args.data_path):
         keep_fn = lambda x: os.path.splitext(x)[1] in ['.svs', '.tiff']
         slide_files = list(folder_iterator(args.data_path, keep_fn))
-#         slide_files = [os.path.join(args.data_path, _) for _ in os.listdir(args.data_path) 
-#                        if not _.startswith('.') and _.endswith('.svs')]
     else:
         rel_path = os.path.basename(args.data_path)
         slide_files = [(0, rel_path, args.data_path)]

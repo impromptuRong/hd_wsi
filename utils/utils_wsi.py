@@ -360,7 +360,7 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
             o['boxes'][:, [1, 3]] += y0_s - y0_p
         
         res.append(o)
-    
+
     return res
 
 
@@ -379,11 +379,12 @@ def yolo_inference_iterator(model, data_loader, input_size=640, compute_masks=Tr
         model.float()
     model.eval()
     model.to(device)
+    model_dtype = next(model.parameters()).dtype
 
     results = defaultdict(list)
     with torch.no_grad():
         for images, patch_infos in data_loader:
-            images = images.to(device, next(model.parameters()).dtype, non_blocking=True)
+            images = images.to(device, model_dtype, non_blocking=True)
             r = batch_inference(model, images, patch_infos, 
                                 input_size=(h, w), compute_masks=compute_masks, 
                                 score_threshold=score_threshold, 
