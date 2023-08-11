@@ -2484,8 +2484,8 @@ class Slide(object):
                     print(f"Didn't find mpp in description.")
 
                 ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
-                level_dims, scales = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0]
-                for page in slide.pages[1:]:
+                level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
+                for page_idx, page in enumerate(slide.pages[1:], 1):
                     if 'label' in page.description or 'macro' in page.description:
                         continue
                     if page.tilewidth == 0 or page.tilelength == 0:
@@ -2494,10 +2494,12 @@ class Slide(object):
                     if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
                         level_dims.append((w, h))
                         scales.append(level_dims[0][0]/w)
-
-                self.page_indices = sorted(range(len(scales)), key=lambda x: scales[x])
-                self.level_dims = [level_dims[idx] for idx in self.page_indices]
-                self.level_downsamples = [scales[idx] for idx in self.page_indices]
+                        page_indices.append(page_idx)
+                
+                order = sorted(range(len(scales)), key=lambda x: scales[x])
+                self.page_indices = [page_indices[idx] for idx in order]
+                self.level_dims = [level_dims[idx] for idx in order]
+                self.level_downsamples = [scales[idx] for idx in order]
                 self.n_levels = len(self.level_downsamples)
         except Exception as e:
             if verbose:
@@ -2538,19 +2540,24 @@ class Slide(object):
         }
 
     def attach_reader(self, fh, engine='openslide'):
+        ## precalculate some args for read_region
+        if engine == 'openslide':
+            # N = len(fh.level_dimensions)
+            # dims = [_ for _ in fh.level_dimensions]
+            # self._osr_cfg = {'n_levels': N, 'level_dims': dims, 'level_downsamples': scales,}
+            levels = [fh.get_best_level_for_downsample(x + 1e-2) 
+                      for x in self.level_downsamples]
+            scales = [self.level_downsamples[lvl] / fh.level_downsamples[osr_level] 
+                      for lvl, osr_level in enumerate(levels)]
+            self._osr_map = {'levels': levels, 'scales': scales,}
+        elif engine == 'tifffile':
+            self._osr_map = {}
+        else:
+            raise ValueError(f"Engine: {self.engine} must be one from ['openslide', 'tiffile'].")
+        
         self.fh = fh
         self.engine = engine
         
-        ## precalculate some args for read_region
-        # N = len(fh.level_dimensions)
-        # dims = [_ for _ in fh.level_dimensions]
-        # self._osr_cfg = {'n_levels': N, 'level_dims': dims, 'level_downsamples': scales,}
-        levels = [fh.get_best_level_for_downsample(x + 1e-2) 
-                  for x in self.level_downsamples]
-        scales = [self.level_downsamples[lvl] / fh.level_downsamples[osr_level] 
-                  for lvl, osr_level in enumerate(levels)]
-        self._osr_map = {'levels': levels, 'scales': scales,}
-
         return self
     
     def detach_reader(self, close=True):
@@ -2627,7 +2634,8 @@ class Slide(object):
         elif self.engine == 'tifffile':
             # tifffile don't reorder page, so need convertion here. Little bit slow.
             tiff_page_idx = self.page_indices[level] % len(self.fh.pages)
-            patch = tiff_page_read_region(self.fh.pages[tiff_page_idx], x0, y0, w, h)[0]
+            patch = tiff_page_read_region(self.fh.pages[tiff_page_idx], x0, y0, w, h)
+            patch = Image.fromarray(patch[0])
         else:
             raise ValueError(f"Engine: {self.engine} is not supported for reading patch.")
         # print(f"utils_image.get_patch: {t3-t0}, {t4-t3}, {(x0, y0, w, h)}")

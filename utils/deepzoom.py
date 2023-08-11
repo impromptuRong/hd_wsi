@@ -1,9 +1,30 @@
 import math
-import time
-
-from utils.utils_image import Slide, get_dzi
+from io import BytesIO
 from PIL import Image
-from openslide import open_slide
+
+
+def get_dzi(image_size, tile_size=254, overlap=1, format='jpeg'):
+    """ Return a string containing the XML metadata for the .dzi file.
+        image_size: (w, h)
+        tile_size: tile size
+        overlap: overlap size
+        format: the format of the individual tiles ('png' or 'jpeg')
+    """
+    import xml.etree.ElementTree as ET
+    image = ET.Element(
+        'Image',
+        TileSize=str(tile_size),
+        Overlap=str(overlap),
+        Format=format,
+        xmlns='http://schemas.microsoft.com/deepzoom/2008',
+    )
+    w, h = image_size
+    ET.SubElement(image, 'Size', Width=str(w), Height=str(h))
+    tree = ET.ElementTree(element=image)
+    buf = BytesIO()
+    tree.write(buf, encoding='UTF-8')
+
+    return buf.getvalue().decode('UTF-8')
 
 
 class DeepZoomGenerator(object):
@@ -88,11 +109,12 @@ class DeepZoomGenerator(object):
         """The total number of Deep Zoom tiles in the image."""
         return sum(t_cols * t_rows for t_cols, t_rows in self.level_tiles)
 
-    def get_tile(self, level, address):
-        """Return an RGB PIL.Image for a tile.
+    def get_tile(self, level, address, format='jpeg'):
+        """Return an RGB(A) PIL.Image for a tile.
         level:     the Deep Zoom level.
         address:   the address of the tile within the level as a (col, row)
-                   tuple."""
+                   tuple.
+        """
         page, coord, z_size = self.get_tile_info(level, address)
         tile = self._osr.get_patch(x=coord, level=page)
 #         x0, y0, w, h = coord
@@ -100,9 +122,10 @@ class DeepZoomGenerator(object):
 #         args = (int(x0 * scale), int(y0 * scale)), page, (int(w), int(h))
 #         tile = self._osr.fh.read_region(*args)
 
-        # Apply on solid background
-        bg = Image.new('RGB', tile.size, self._bg_color)
-        tile = Image.composite(tile, bg, tile)
+        # Apply on solid background if it's a rgba image
+        if tile.mode == 'RGBA':
+            bg = Image.new('RGB', tile.size, self._bg_color)
+            tile = Image.composite(tile, bg, tile)
 
         # Scale to the correct size
         if tile.size != z_size:
