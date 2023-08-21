@@ -2275,11 +2275,13 @@ def tiff_page_read_region(page, w0, h0, w, h):
     if h < 1 or w < 1:
         raise ValueError("h and w must be strictly positive.")
 
-    if h0 < 0 or w0 < 0 or h0 + h >= im_height or w0 + w >= im_width:
-        raise ValueError("Requested crop area is out of image bounds.")
+#     if h0 < 0 or w0 < 0 or h0 + h >= im_height or w0 + w >= im_width:
+#         raise ValueError("Requested crop area is out of image bounds.")
 
     tile_width, tile_height = page.tilewidth, page.tilelength
     h1, w1 = h0 + h, w0 + w
+    h0, w0 = max(0, h0), max(0, w0)
+    h1, w1 = min(h0 + h, im_height), min(w0 + w, im_width)
 
     tile_h0, tile_w0 = h0 // tile_height, w0 // tile_width
     tile_h1, tile_w1 = np.ceil([h1 / tile_height, w1 / tile_width]).astype(int)
