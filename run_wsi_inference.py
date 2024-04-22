@@ -194,8 +194,8 @@ def main(args):
                     alpha=1.0 if args.box_only else CONFIGS.MASK_ALPHA,
                 )
                 # Image.fromarray(mask).save(img_file)
-                wsi_imwrite(mask, img_file, outputs['slide_info'], CONFIGS.TIFF_PARAMS,
-                            model=outputs['model'],
+                wsi_imwrite(mask, img_file, 'HD-Yolo', outputs['slide_info'], CONFIGS.TIFF_PARAMS,
+                            bigtiff=True, model=outputs['model'],
                            )
                 print(f"{time.time()-t0} s")
 

@@ -54,7 +54,9 @@ ROI_NAMES = {
 }
 
 TIFF_PARAMS = {
-    'tile': (256, 256), 
+    'tile': (1, 256, 256), 
     'photometric': 'RGB',
-    'compress': True,  # compression=('jpeg', 95),  # None RGBA, requires imagecodecs
+    # 'compression': 'jpeg',
+    'compression': 'zlib',
+    'compressionargs': {'level': 8},
 }

@@ -123,7 +123,7 @@ class DeepZoomGenerator(object):
 #         tile = self._osr.fh.read_region(*args)
 
         # Apply on solid background if it's a rgba image
-        if tile.mode == 'RGBA':
+        if tile.mode == 'RGBA' and format == 'jpeg':
             bg = Image.new('RGB', tile.size, self._bg_color)
             tile = Image.composite(tile, bg, tile)
 

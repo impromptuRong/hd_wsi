@@ -538,23 +538,41 @@ def export_detections_to_image(object_iterator, img_size, labels_color, save_mas
     return F.embedding(img_label, color_tensor).numpy()
 
 
-def wsi_imwrite(image, filename, slide_info, tiff_params, **kwargs):
+def wsi_imwrite(image, filename, header, slide_info, tiff_params, bigtiff=False, scales=None, **kwargs):
     w0, h0 = image.shape[1], image.shape[0]
-    tile_w, tile_h = tiff_params['tile']
-    mpp = slide_info['mpp']
-    now = datetime.datetime.now()
-    # software='Aperio Image Library v11.1.9'
+    if len(image.shape) == 2:  # single channel
+        if 'photometric' not in tiff_params:
+            tiff_params['photometric'] = 'MINISBLACK'
+        assert tiff_params['photometric'].upper() in ['MINISBLACK', 'MINISWHITE']
+    else:
+        default_photometric = {3: 'RGB', 4: 'RGBA'}[image.shape[-1]]
+        if 'photometric' not in tiff_params:
+            tiff_params['photometric'] = default_photometric
 
-    with tifffile.TiffWriter(filename, bigtiff=False) as tif:
-        descp = f"HD-Yolo\n{w0}x{h0} ({tile_w}x{tile_h}) RGBA|{now.strftime('Date = %Y-%m-%d|Time = %H:%M:%S')}"
+    tile_w, tile_h = tiff_params['tile'][-2:]   # (None/depth, w, h)
+    # mpp = slide_info.get('mpp', 0.25)
+    now = datetime.datetime.now()
+
+    if scales is None:
+        scales = []
+        w, h, scale = w0, h0, 1
+        while w > 512 or h > 512:
+            scale *= 2
+            scales.append(scale)
+            w, h = w0 // scale, h0 // scale
+
+    with tifffile.TiffWriter(filename, bigtiff=bigtiff) as tif:
+        info_message = ', '.join(f'{k}={v}' for k, v in slide_info.items())
+        descp = f"{header}\n{w0}x{h0} ({tile_w}x{tile_h}) {tiff_params['photometric']}|{info_message}|{now.strftime('Date = %Y-%m-%d|Time = %H:%M:%S')}"
         for k, v in kwargs.items():
             descp += f'|{k} = {v}'
         # resolution=(mpp * 1e-4, mpp * 1e-4, 'CENTIMETER')
-        tif.save(image, metadata=None, description=descp, subfiletype=0, **tiff_params,)
+        tif.write(image, metadata=None, description=descp, subfiletype=0, **tiff_params,)  # subifds=len(scales), 
 
-        for w, h in sorted(slide_info['level_dims'][1:], key=lambda x: x[0], reverse=True):
+        for scale in scales:
+            w, h = w0 // scale, h0 // scale
             image = cv2.resize(image, dsize=(w, h), interpolation=cv2.INTER_LINEAR)
-            descp = f"{w0}x{h0} ({tile_w}x{tile_h}) -> {w}x{h} RGBA"
+            descp = f"{w0}x{h0} ({tile_w}x{tile_h}) -> {w}x{h} {tiff_params['photometric']}"
             # tile = (page.tilewidth, page.tilelength) if page.tilewidth > 0 and page.tilelength > 0 else None
             # resolution=(mpp * 1e-4 * w0/w, mpp * 1e-4 * h0/h, 'CENTIMETER')
-            tif.save(image, metadata=None, description=descp, subfiletype=1, **tiff_params,)
+            tif.write(image, metadata=None, description=descp, subfiletype=1, **tiff_params,)
