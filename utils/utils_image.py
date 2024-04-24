@@ -260,6 +260,16 @@ def pad(img, size=None, pad_width=None, pos='center', mode='constant', **kwargs)
     return img
 
 
+def pad_pil(img, pad_width, color=0):
+    pad_l, pad_r, pad_u, pad_d = pad_width
+    w, h = img.size
+
+    res = Image.new(img.mode, (w + pad_l + pad_r, h + pad_u + pad_d), color)
+    res.paste(img, (pad_l, pad_u))
+
+    return res
+
+
 class Pad(object):
     def __init__(self, size=None, pad_width=None, pos='center', mode='constant', **kwargs):
         if isinstance(size, numbers.Number):
@@ -1763,7 +1773,7 @@ def binary_mask_to_coco_annotation(x, mask_id=None, image_id=None,
     
     height, width = x.shape
     rle = mask_utils.encode(np.asfortranarray(x.astype(np.uint8)))
-    bbox = mask_utils.toBbox(rle).astype(np.int).tolist()
+    bbox = mask_utils.toBbox(rle).astype(np.int32).tolist()
     area = 1.0 * mask_utils.area(rle)
     if iscrowd:
         mask = binary_mask_to_rle(x, compress=False)
@@ -2061,6 +2071,7 @@ def default_color_palette(n_colors=None):
 def overlay_detections(ax, bboxes=None, labels=None, masks=None, scores=None,
                        labels_color=None, labels_text=None,
                        show_bboxes=True, show_texts=True, show_masks=True, show_scores=True,
+                       fontsize=6
                       ):
     # sns.color_palette()
     _cmap = [
@@ -2154,7 +2165,7 @@ def overlay_detections(ax, bboxes=None, labels=None, masks=None, scores=None,
             text_pad = 4
             ax.annotate(text, (y1, x1), xytext=(text_pad, text_pad), textcoords='offset pixels',
                         bbox=dict(facecolor=c, edgecolor='none', alpha=0.3, pad=text_pad), color='b', # backgroundcolor=c, 
-                        fontsize=6, ha='left', va='bottom')
+                        fontsize=fontsize, ha='left', va='bottom')
             # ax.annotate(text, (y1, x1), color=c, weight='bold', ) # fontsize=6, ha='center', va='center')
 
         if show_masks:
@@ -2441,7 +2452,7 @@ class ImageTiles(object):
         return np.stack([pad_l, pad_r, pad_u, pad_d], axis=-1)
 
 
-class Slide(object):
+class Slide:
     """ Class for wsi image + xml annotations. 
         Load a whole slide image (and annotations). Class provides the following members:
         thumbnail: get a thumbnail image (can specify size and max file size)
@@ -2450,19 +2461,17 @@ class Slide(object):
         whole_slide_scanner: scan the whole slide and generate necessary coords for each patches.
         random_patches: randomly select patches from slide (inside given ROI/annotation/polygon).
     """
-    def __init__(self, img_file, ann_file=None, slide_id=None, verbose=1):
+    def __init__(self, img_file, ann_file=None, slide_id=None, attach_fh=False, verbose=1):
         """
-            img_file: input path for wholde slide image
+            img_file: input path for whole slide image
             ann_file (optional): annotation file for the slide
             slide_id (optional): give a unique id. if None, script will use img_file name.
             engine (optional): image io engine. one of ['openslide', 'tifffile', 'skimage'].
                     TODO: add support to get_patch for different engine.
             verbose (optional): print out loading information and errors.
         """
-        self.img_file = img_file
-        self.ann_file = ann_file
-        self.slide_id = slide_id or os.path.splitext(os.path.basename(img_file))[0]
-        
+        self._fh = None
+        self.engine = None
         self.magnitude = None
         self.mpp = None
         self.description = None
@@ -2470,50 +2479,29 @@ class Slide(object):
         self.level_dims = []
         self.level_downsamples = []
         
-#         try:
-        if verbose:
-            print(f"Loading slide: {self.img_file}")
-        with open(self.img_file, 'rb') as fp:
-            slide = TiffFile(fp)
-            self.description = slide.pages[0].description
-
-            # magnification
-            val = re.findall(r'((?i:mag)|(?i:magnitude))(\s)*=(\s)*(?P<mag>[\d.]+)', self.description)
-            self.magnitude = float(val[0][-1]) if val else None
-            if verbose and self.magnitude is None:
-                print(f"Didn't find magnitude in description.")
-
-            # mpp
-            val = re.findall(r'((?i:mpp))(\s)*=(\s)*(?P<mpp>[\d.]+)', self.description)
-            self.mpp = float(val[0][-1]) if val else None
-            if verbose and self.mpp is None:
-                print(f"Didn't find mpp in description.")
-
-            ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
-            level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
-            for page_idx, page in enumerate(slide.pages[1:], 1):
-                if 'label' in page.description or 'macro' in page.description:
-                    continue
-                if page.tilewidth == 0 or page.tilelength == 0:
-                    continue
-                h, w = page.shape[0], page.shape[1]
-                if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
-                    level_dims.append((w, h))
-                    scales.append(level_dims[0][0]/w)
-                    page_indices.append(page_idx)
-
-            order = sorted(range(len(scales)), key=lambda x: scales[x])
-            self.page_indices = [page_indices[idx] for idx in order]
-            self.level_dims = [level_dims[idx] for idx in order]
-            self.level_downsamples = [scales[idx] for idx in order]
-            self.n_levels = len(self.level_downsamples)
-#         except Exception as e:
-#             if verbose:
-#                 print(f"Failed to load slide: {img_file}.")
-#                 print(e)
-                # traceback.print_exc()
+        try:
+            if isinstance(img_file, str):  # filename
+                self.img_file = img_file
+                fh = TiffFile(img_file)
+                self.register_entries(fh)
+                if attach_fh:
+                    self.attach_reader(fh, engine='tifffile')
+                else:
+                    fh.close()
+            else:  # tiff reader: TiffFile, SimpleTiff, etc
+                self.img_file = img_file.filename
+                fh = img_file
+                self.register_entries(fh)
+                if attach_fh:
+                    self.attach_reader(fh, engine='tifffile')
+        except Exception as e:
+            print(f"Failed to load slide: {img_file}.")
+            print(e)        
         
+        self.slide_id = slide_id or os.path.splitext(os.path.basename(self.img_file))[0]
+
         ## load annotations
+        self.ann_file = ann_file
         self.xml_tree = None
         self.annotations = None
         if ann_file is not None:
@@ -2526,15 +2514,48 @@ class Slide(object):
             except:
                 if verbose:
                     print(f"Failed to load annotation: {ann_file}")
-        
-        ## Set engine and file handle to None
-        self.fh = None
-        self.engine = None
     
+    def register_entries(self, slide):
+        self.description = slide.pages[0].description
+
+        # magnification
+        # val = re.findall(r'\|((?i:AppMag)|(?i:magnitude)) = (?P<mag>[\d.]+)', self.description)
+        val = re.findall(r'((?i:mag)|(?i:magnitude))(\s)*=(\s)*(?P<mag>[\d.]+)', self.description)
+        self.magnitude = float(val[0][-1]) if val else None
+        if self.magnitude is None:
+            print(f"Didn't find magnitude in description.")
+
+        # mpp
+        # val = re.findall(r'\|((?i:MPP)) = (?P<mpp>[\d.]+)', self.description)
+        val = re.findall(r'((?i:mpp))(\s)*=(\s)*(?P<mpp>[\d.]+)', self.description)
+        self.mpp = float(val[0][-1]) if val else None
+        if self.mpp is None:
+            print(f"Didn't find mpp in description.")
+
+        ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
+        level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
+        for page_idx, page in enumerate(slide.pages[1:], 1):
+            if 'label' in page.description or 'macro' in page.description:
+                continue
+            if page.tilewidth == 0 or page.tilelength == 0:
+                continue
+            h, w = page.shape[0], page.shape[1]
+            if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
+                level_dims.append((w, h))
+                scales.append(level_dims[0][0]/w)
+                page_indices.append(page_idx)
+
+        order = sorted(range(len(scales)), key=lambda x: scales[x])
+        self.page_indices = [page_indices[idx] for idx in order]
+        self.level_dims = [level_dims[idx] for idx in order]
+        self.level_downsamples = [scales[idx] for idx in order]
+        # self.n_levels = len(self.level_downsamples)
+
     @property
     def level_dimensions(self):
         return tuple(self.level_dims)
     
+    @property
     def info(self):
         return {
             'img_file': self.img_file,
@@ -2544,6 +2565,9 @@ class Slide(object):
             'level_dims': self.level_dims,
             'description': self.description,
         }
+
+    def filehandle(self):
+        return self._fh
 
     def attach_reader(self, fh, engine='openslide'):
         ## precalculate some args for read_region
@@ -2558,18 +2582,20 @@ class Slide(object):
             self._osr_map = {'levels': levels, 'scales': scales,}
         elif engine == 'tifffile':
             self._osr_map = {}
+        elif engine == 'simpletiff':
+            self._osr_map = {}
         else:
-            raise ValueError(f"Engine: {engine} must be one from ['openslide', 'tifffile'].")
+            raise ValueError(f"Engine: {engine} must be one from ['openslide', 'tifffile', 'simpletiff'].")
         
-        self.fh = fh
+        self._fh = fh
         self.engine = engine
         
         return self
     
     def detach_reader(self, close=True):
         if close:
-            self.fh.close()
-        self.fh = None
+            self._fh.close()
+        self._fh = None
         self.engine = None
 
         return self
@@ -2635,12 +2661,19 @@ class Slide(object):
             # openslide need x0, y0 in lowest page not current page, w, h 
             osr_x0, osr_y0 = round(x0 * scale), round(y0 * scale)
             osr_w, osr_h = round(w * osr_scale), round(h * osr_scale)
-            patch = self.fh.read_region((osr_x0, osr_y0), osr_level, (osr_w, osr_h))
+            patch = self._fh.read_region((osr_x0, osr_y0), osr_level, (osr_w, osr_h))
             # t4 = time.time()
         elif self.engine == 'tifffile':
             # tifffile don't reorder page, so need convertion here. Little bit slow.
-            tiff_page_idx = self.page_indices[level] % len(self.fh.pages)
-            patch = tiff_page_read_region(self.fh.pages[tiff_page_idx], x0, y0, w, h)[0]
+            tiff_page_idx = self.page_indices[level] % len(self._fh.pages)
+            patch = tiff_page_read_region(self._fh.pages[tiff_page_idx], x0, y0, w, h)[0]
+            if len(patch.shape) == 3 and patch.shape[-1] == 1:  # single channel
+                patch = patch[..., 0]
+            patch = Image.fromarray(patch)
+        elif self.engine == 'simpletiff':
+            # tifffile don't reorder page, so need convertion here. Little bit slow.
+            tiff_page_idx = self.page_indices[level] % len(self._fh.pages)
+            patch = self._fh.read_region(self._fh.pages[tiff_page_idx], x0, y0, w, h)[0]
             if len(patch.shape) == 3 and patch.shape[-1] == 1:  # single channel
                 patch = patch[..., 0]
             patch = Image.fromarray(patch)
@@ -2652,7 +2685,7 @@ class Slide(object):
 
     def get_patch_os(self, x, level=0):
         x0, y0, w, h = x
-        return self.fh.read_region((x0, y0), level, (w, h))
+        return self._fh.read_region((x0, y0), level, (w, h))
 
     def get_page(self, level=0):
         with open(self.img_file, 'rb') as fp:
@@ -2781,6 +2814,16 @@ class Slide(object):
         
         return tiles.coords()
     
+    def deepzoom_dims(self, image_size=None):
+        # Deep Zoom level
+        z_size = image_size or self.level_dimensions[0]
+        z_dimensions = [z_size]
+        while z_size[0] > 1 or z_size[1] > 1:
+            z_size = tuple(max(1, int(math.ceil(z / 2))) for z in z_size)
+            z_dimensions.append(z_size)
+        
+        return tuple(reversed(z_dimensions))
+
     def whole_slide_scanner(self, patch_size, level=0, masks=None, coverage_threshold=1e-8):
         ## TODO: change level to image_size, support any dimension and any types of masks
         """ Scan the whole slide and return coordinates/sizes of valid pathes.
@@ -2887,7 +2930,7 @@ class Slide(object):
         ## shift bboxes at corner and border into valid region, flip x and y to match cv2 functions
         coords[:,0] = np.clip(coords[:,0], 0, w - patch_size[0])
         coords[:,1] = np.clip(coords[:,1], 0, h - patch_size[1])
-        patches = np.hstack([coords.astype(np.int), np.tile(patch_size, (pool_size, 1))])
+        patches = np.hstack([coords.astype(np.int32), np.tile(patch_size, (pool_size, 1))])
         
         ## generate mask and calculate iou (project on low resolution to save time)
 
@@ -2895,9 +2938,9 @@ class Slide(object):
             level_idx = self.get_resize_level((1024, 1024))
             masks = self.polygons2mask(polygons, shape=self.level_dims[level_idx], scale=1./scales[level_idx])
             scores = np.array([np.sum(masks[y0:y0+dh, x0:x0+dw])/dw/dh 
-                               for x0, y0, dw, dh in (patches / np.tile(scales[level_idx], 2)).astype(np.int)])
+                               for x0, y0, dw, dh in (patches / np.tile(scales[level_idx], 2)).astype(np.int32)])
         else:
-            scores = np.array([scores_fn(_) for _ in patches.astype(np.int)])
+            scores = np.array([scores_fn(_) for _ in patches.astype(np.int32)])
 
         # cv2 may cause segmentation fault...
         keep = cv2.dnn.NMSBoxes(patches, scores, score_threshold=coverage_threshold, 

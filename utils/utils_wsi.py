@@ -41,15 +41,24 @@ def load_cfg(cfg):
     return yaml
 
 
-def load_hdyolo_model(model_path, nms_params={}):
-    model = torch.jit.load(model_path, map_location='cpu')
-    model.eval()
+def load_hdyolo_model(model, device='cpu', nms_params={}):
+    if isinstance(model, str):
+        model = torch.jit.load(model, map_location='cpu')
+
     # update nms_params based on config file
     new_nms_params = {
         k: nms_params.get(k, v)
         for k, v in model.headers.det.nms_params.items()
     }
     model.headers.det.nms_params = new_nms_params
+    
+    if isinstance(device, str):
+        device = torch.device(device)
+
+    if device.type == 'cpu':  # half precision only supported on CUDA
+        model.float()
+    model.eval()
+    model.to(device)
 
     return model
 
@@ -338,7 +347,7 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
         if iou_threshold < 1.:
             keep = torchvision.ops.nms(o['boxes'], o['scores'], iou_threshold=iou_threshold)
             o = {k: v[keep] for k, v in o.items()}
-        
+
         if len(o['boxes']):
             # trim border objects, map to original coords
             o['boxes'][:, [0, 2]] *= w_ori/w  # rescale to image size
@@ -349,7 +358,7 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
 #             x0_s, y0_s, w_s, h_s = roi_slide  # torch.int32
 #             x0_p, y0_p, w_p, h_p = roi_patch  # torch.int32
 #             assert x0_p == 64 and y0_p == 64 and w_s == w_p and h_s == h_p, f"{roi_slide}, {roi_patch}"
-            
+
             x_c, y_c = o['boxes'][:,[0,2]].mean(1), o['boxes'][:,[1,3]].mean(1)
             keep = (x_c > x0_p) & (x_c < x0_p + w_p) & (y_c > y0_p) & (y_c < y0_p + h_p)
             o = {k: v[keep] for k, v in o.items()}
@@ -358,7 +367,7 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
             o['boxes'] = o['boxes'].to(torch.float32)
             o['boxes'][:, [0, 2]] += x0_s - x0_p
             o['boxes'][:, [1, 3]] += y0_s - y0_p
-        
+
         res.append(o)
 
     return res

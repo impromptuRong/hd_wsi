@@ -27,10 +27,10 @@ def get_dzi(image_size, tile_size=254, overlap=1, format='jpeg'):
     return buf.getvalue().decode('UTF-8')
 
 
-class DeepZoomGenerator(object):
+class DeepZoomGenerator:
     """Generates Deep Zoom tiles and metadata."""
 
-    def __init__(self, osr, tile_size=254, overlap=1, limit_bounds=False, format='jpeg'):
+    def __init__(self, osr, tile_size=254, overlap=1, limit_bounds=False, image_size=None, format='jpeg'):
         """ Create a DeepZoomGenerator wrapping an OpenSlide object.
         osr:          a Slide object.
         tile_size:    the width and height of a single tile.  For best viewer
@@ -40,9 +40,9 @@ class DeepZoomGenerator(object):
                       of a tile.
         limit_bounds: True to render only the non-empty slide region.
                       (We don't use limit_bounds)
+        image_size:   give a arbitary image size, default use w, h from page0.
         """
         self._osr = osr
-        self.mpp = osr.mpp or 0.25  # default mpp set to 0.25, lowest layer
         self.tile_size = tile_size
         self.overlap = overlap
         if limit_bounds:
@@ -53,24 +53,25 @@ class DeepZoomGenerator(object):
         self.default_format = self.format = format
 
         # Deep Zoom level
-        z_size = self._osr.level_dimensions[0]
-        z_dimensions = [z_size]
-        while z_size[0] > 1 or z_size[1] > 1:
-            z_size = tuple(max(1, int(math.ceil(z / 2))) for z in z_size)
-            z_dimensions.append(z_size)
-        self.dz_dimensions = tuple(reversed(z_dimensions))
+        # z_size = image_size or osr.level_dimensions[0]
+        # z_dimensions = [z_size]
+        # while z_size[0] > 1 or z_size[1] > 1:
+        #     z_size = tuple(max(1, int(math.ceil(z / 2))) for z in z_size)
+        #     z_dimensions.append(z_size)
+        # self.dz_dimensions = tuple(reversed(z_dimensions))
+        self.dz_dimensions = osr.deepzoom_dims(image_size)
         self._dz_levels = len(self.dz_dimensions)  # Deep Zoom level count
 
         self.page_tile_indices = []
         for dz_level, (wz, hz) in enumerate(self.dz_dimensions):
             d = 2 ** (self._dz_levels - dz_level - 1)
-            page = self._osr.get_resize_level(d, downsample_only=True)
-            factor = d / self._osr.level_downsamples[page]
+            page = osr.get_resize_level(d, downsample_only=True)
+            factor = d / osr.level_downsamples[page]
             tile_size = round(self.tile_size * factor)
             overlap = round(self.overlap * factor)
 
-            coords_dzi = self._osr.deepzoom_coords(self.tile_size, self.overlap, image_size=(wz, hz))
-            coords_osr = self._osr.deepzoom_coords(tile_size, overlap, image_size=page)
+            coords_dzi = osr.deepzoom_coords(self.tile_size, self.overlap, image_size=(wz, hz))
+            coords_osr = osr.deepzoom_coords(tile_size, overlap, image_size=page)
             # coords_osr = (coords_dzi * factor).round().clip()
 
             self.page_tile_indices.append([page, coords_osr, coords_dzi])
@@ -142,7 +143,7 @@ class DeepZoomGenerator(object):
         if level < 0 or level >= self._dz_levels:
             raise ValueError(f"Invalid level {level}")
         col, row = address
-
+        
         # Get preferred slide page
         page, coords_osr, coords_dzi = self.page_tile_indices[level]
         coord, (w, h) = coords_osr[row][col], coords_dzi[row][col][2:]
@@ -151,7 +152,7 @@ class DeepZoomGenerator(object):
 
     def get_dzi(self, format=None):
         return get_dzi(
-            self._osr.level_dimensions[0], 
+            self.dz_dimensions[-1], 
             tile_size=self.tile_size, 
             overlap=self.overlap, 
             format=format or self.default_format,

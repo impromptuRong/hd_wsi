@@ -4,6 +4,7 @@ import time
 import torch
 import psutil
 import argparse
+import datetime
 from PIL import Image
 from openslide import open_slide
 
@@ -86,17 +87,15 @@ def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
     print("==============================")
-    model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
     if args.device == 'cuda' and not torch.cuda.is_available():
         print(f"Cuda is not available, use cpu instead.")
         args.device = 'cpu'
     device = torch.device(args.device)
-    
-    if device.type == 'cpu':  # half precision only supported on CUDA
-        model.float()
-    model.eval()
-    model.to(device)
-    print(f"Load model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
+    try:
+        model = load_hdyolo_model(args.model, device=device, nms_params=CONFIGS.NMS_PARAMS)
+        print(f"Load hdyolo model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
+    except:
+        raise ValueError(f"Failed to load {args.model} to {args.device}.")
 
     meta_info = load_cfg(args.meta_info)
     dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
@@ -143,7 +142,7 @@ def main(args):
                                         max_mem=args.max_memory,
                                        )
             outputs['meta_info'] = meta_info
-            outputs['slide_info'] = dataset.slide.info()
+            outputs['slide_info'] = dataset.slide.info
             outputs['slide_size'] = dataset.slide_size
             outputs['model'] = args.model
             outputs['rois'] = dataset.masks
@@ -228,10 +227,11 @@ def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('WSI inference with HD-Yolo.', add_help=True)
     parser.add_argument('--data_path', required=True, type=str, help="input data filename or directory.")
+    # parser.add_argument('data_path', nargs='?', type=str, help="Input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="meta info yaml file: contains label texts and colors.")
     parser.add_argument('--model', default='lung', type=str, help="Model path, torch jit model." )
-    parser.add_argument('--output_dir', default='slide_results', type=str, help="Output folder.")
+    parser.add_argument('--output_dir', default=None, type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--roi', default='tissue', type=str, help='ROI region.')
     parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
@@ -249,4 +249,8 @@ if __name__ == '__main__':
                         help="If save_csv is enabled, whether to export mask polygons into csv.")
 
     args = parser.parse_args()
+    if args.output_dir is None:
+        ct = datetime.datetime.now()
+        args.output_dir = f"./slide_results/{ct.strftime('%Y%m%dT%H%M%S')}"
+
     main(args)

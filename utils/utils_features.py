@@ -258,6 +258,7 @@ def delaunay_features(coords, labels, min_dist=0., max_dist=np.inf):
     return pairs[keep].tolist(), dists[keep].tolist()
 
 
+## TODO: remove function, duplicates in utils_image.py
 def polygons2mask(polygons, shape, scale=1.):
     """ Use cv2.fillPoly to be consistent with (w, h) pattern.
     """
@@ -288,7 +289,7 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
     ## shift bboxes at corner and border into valid region, flip x and y to match cv2 functions
     coords[:,0] = np.clip(coords[:,0], 0, w - patch_size[0])
     coords[:,1] = np.clip(coords[:,1], 0, h - patch_size[1])
-    patches = np.hstack([coords.astype(np.int), np.tile(patch_size, (pool_size, 1))])
+    patches = np.hstack([coords.astype(np.int32), np.tile(patch_size, (pool_size, 1))])
 
     ## generate mask and calculate iou (on the lowest resolution to save time)
     if scores_fn is None:  # use mask_region/patch_size as score
@@ -296,9 +297,9 @@ def random_patches(N, patch_size, polygons, image_size=None, scores_fn=None,
         # (w, h), scales = self.get_scales(image_size)
         masks = polygons2mask(polygons, shape=(w, h))
         # skimage.io.imsave('./masks_poly.png', masks)
-        scores = np.array([masks[y0:y0+dh, x0:x0+dw].sum()/dw/dh for x0, y0, dw, dh in patches.astype(np.int)])
+        scores = np.array([masks[y0:y0+dh, x0:x0+dw].sum()/dw/dh for x0, y0, dw, dh in patches.astype(np.int32)])
     else:
-        scores = np.array([scores_fn(_) for _ in patches.astype(np.int)])
+        scores = np.array([scores_fn(_) for _ in patches.astype(np.int32)])
 
     cutoff = scores >= score_threshold
     patches, scores, indices = patches[cutoff], scores[cutoff], indices[cutoff]

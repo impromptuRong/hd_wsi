@@ -5,6 +5,7 @@ import time
 import torch
 import numbers
 import argparse
+import datetime
 from PIL import Image
 import torch.nn.functional as F
 from torchvision.transforms import ToTensor
@@ -68,18 +69,29 @@ def overlay_masks_on_image(image, mask):
 def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
+#     print("==============================")
+#     model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
+#     if args.device == 'cuda' and not torch.cuda.is_available():
+#         print(f"Cuda is not available, use cpu instead.")
+#         args.device = 'cpu'
+#     device = torch.device(args.device)
+    
+#     if device.type == 'cpu':  # half precision only supported on CUDA
+#         model.float()
+#     model.eval()
+#     model.to(device)
+#     print(f"Load model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
+
     print("==============================")
-    model = load_hdyolo_model(args.model, nms_params=CONFIGS.NMS_PARAMS)
     if args.device == 'cuda' and not torch.cuda.is_available():
         print(f"Cuda is not available, use cpu instead.")
         args.device = 'cpu'
     device = torch.device(args.device)
-    
-    if device.type == 'cpu':  # half precision only supported on CUDA
-        model.float()
-    model.eval()
-    model.to(device)
-    print(f"Load model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
+    try:
+        model = load_hdyolo_model(args.model, device=device, nms_params=CONFIGS.NMS_PARAMS)
+        print(f"Load hdyolo model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
+    except:
+        raise ValueError(f"Failed to load {args.model} to {args.device}.")
 
     meta_info = load_cfg(args.meta_info)
     dataset_configs = {'mpp': CONFIGS.DEFAULT_MPP, **CONFIGS.DATASETS, **meta_info}
@@ -165,11 +177,12 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('Patch inference with HD-Yolo.', add_help=True)
-    parser.add_argument('--data_path', required=True, type=str, help="Input data filename or directory.")
+    parser.add_argument('--data_path', required=True, type=str, help="input data filename or directory.")
+    # parser.add_argument('data_path', nargs='?', type=str, help="Input data filename or directory.")
     parser.add_argument('--meta_info', default='meta_info.yaml', type=str, 
                         help="A yaml file contains: label texts and colors.")
     parser.add_argument('--model', default='lung', type=str, help="Model path, torch jit model." )
-    parser.add_argument('--output_dir', default='patch_results', type=str, help="Output folder.")
+    parser.add_argument('--output_dir', default=None, type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--mpp', default=None, type=float, help='Input data mpp.')
     # parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
@@ -179,4 +192,8 @@ if __name__ == '__main__':
                         help="If save_csv is enabled, whether to convert numeric labels into text.")
 
     args = parser.parse_args()
+    if args.output_dir is None:
+        ct = datetime.datetime.now()
+        args.output_dir = f"./patch_results/{ct.strftime('%Y%m%dT%H%M%S')}"
+
     main(args)

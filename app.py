@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import functools
 import logging
+import tifffile
 import concurrent.futures
 
 from io import BytesIO
@@ -106,7 +107,7 @@ class Runner(object):
         
         self.name = name
         if isinstance(model, str):
-            model = load_hdyolo_model(model, nms_params=hd_cfg.NMS_PARAMS)
+            model = load_hdyolo_model(model, device=torch.device('cpu'), nms_params=hd_cfg.NMS_PARAMS)
             print(model.headers.det.nms_params)
         elif isinstance(model, bentoml.Model):
             model = model.info.imported_module.load_model(model)
@@ -423,7 +424,8 @@ class _SlideCache:
         print(f"======================================")
         print(f"Prepare slide: {slide_path}, ", end="")
         osr = Slide(*get_slide_and_ann_file(slide_path))
-        osr.attach_reader(openslide.open_slide(osr.img_file), engine='openslide')
+        # osr.attach_reader(openslide.open_slide(osr.img_file), engine='openslide')
+        osr.attach_reader(tifffile.TiffFile(osr.img_file), engine='tifffile')
         print(f"attach file success.")
 
         print(f"Build WholeSlideDataset: ", end="")
@@ -448,6 +450,22 @@ class _SlideCache:
         return slide, dataset
 
 
+# class _Directory:
+#     def __init__(self, slide_dir, relpath=''):
+#         self.name = os.path.basename(relpath)
+#         self.children = []
+#         for name in sorted(os.listdir(os.path.join(slide_dir, relpath))):
+#             cur_relpath = os.path.join(relpath, name)
+#             cur_path = os.path.join(slide_dir, cur_relpath)
+#             if os.path.isdir(cur_path):
+#                 cur_dir = _Directory(slide_dir, cur_relpath)
+#                 if cur_dir.children:
+#                     self.children.append(cur_dir)
+#             # elif OpenSlide.detect_format(cur_path):
+#             elif cur_path.endswith('.svs'):
+#                 self.children.append(_SlideFile(cur_relpath))
+
+
 class _Directory:
     def __init__(self, slide_dir, relpath=''):
         self.name = os.path.basename(relpath)
@@ -455,12 +473,7 @@ class _Directory:
         for name in sorted(os.listdir(os.path.join(slide_dir, relpath))):
             cur_relpath = os.path.join(relpath, name)
             cur_path = os.path.join(slide_dir, cur_relpath)
-            if os.path.isdir(cur_path):
-                cur_dir = _Directory(slide_dir, cur_relpath)
-                if cur_dir.children:
-                    self.children.append(cur_dir)
-            # elif OpenSlide.detect_format(cur_path):
-            elif cur_path.endswith('.svs'):
+            if os.path.splitext(cur_path)[-1] in ['.svs', '.png', '.tiff']:
                 self.children.append(_SlideFile(cur_relpath))
 
 

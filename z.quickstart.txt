@@ -7,14 +7,14 @@ python -u run_patch_inference.py --data_path assets/9388_1_1.png --model lung --
 ## Run whole slide inference with default options
 CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi
 
-## Generate results in folder sample_wsi
+## Run WSI analysis and export segmentation mask and nuclei csv table
 CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --output_dir test_wsi --save_img --save_csv
 
 ## Run whole slide inference with lung cancer model under limited computational resources
-CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --model lung --output_dir test_results --save_img --batch_size 4 --num_workers 8 --max_memory 1000
+CUDA_VISIBLE_DEVICES=0 python -u run_wsi_inference.py --data_path sample.svs --model lung --output_dir test_wsi --save_img --save_csv --batch_size 4 --num_workers 8 --max_memory 1000
 
-## Generate results in folder sample_tme
-CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path ./test_wsi --output_dir ./test_features --n_classes 3 --scale_factor 32 --save_images
+## Run feature extraction pipeline
+CUDA_VISIBLE_DEVICES=0 python -u summarize_tme_features.py --model_res_path ./test_wsi --output_dir ./test_features --n_classes 3 --scale_factor 32 --save_images --save_nuclei
 
 ## Start a realtime server by default
 ln -s /path/to/slides slides_folder
@@ -28,5 +28,5 @@ docker pull imprompturong/hd_wsi:latest
 # Or build from scratch
 docker build -t hd_wsi:latest .
 # Run docker
-docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder hd_wsi:latest
+docker run -p 5000:5000 -v `readlink -f /path/to/slides_folder`:/usr/src/hd_wsi/slides_folder imprompturong/hd_wsi:latest
 

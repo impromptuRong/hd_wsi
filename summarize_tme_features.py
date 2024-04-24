@@ -126,8 +126,11 @@ def main(args):
                 density_img = density_plot(cloud_d, scale_factor=1./args.scale_factor)
 
                 # load a thumbnail image
-                svs_file = os.path.join(args.data_path, slide_info['img_file'])
                 try:
+                    if 'img_file' in slide_info:
+                        svs_file = os.path.join(args.data_path, slide_info['img_file'])
+                    else:
+                        svs_file = os.path.join(args.data_path, slide_info['svs_file'])  # compatible to old code
                     xml_file = slide_info.get('xml_file') 
                     xml_file = os.path.join(args.data_path, xml_file) if xml_file is not None else None
                     slide = Slide(svs_file, xml_file, verbose=False)
