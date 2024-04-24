@@ -30,7 +30,7 @@ def get_dzi(image_size, tile_size=254, overlap=1, format='jpeg'):
 class DeepZoomGenerator(object):
     """Generates Deep Zoom tiles and metadata."""
 
-    def __init__(self, osr, tile_size=254, overlap=1, limit_bounds=False):
+    def __init__(self, osr, tile_size=254, overlap=1, limit_bounds=False, format='jpeg'):
         """ Create a DeepZoomGenerator wrapping an OpenSlide object.
         osr:          a Slide object.
         tile_size:    the width and height of a single tile.  For best viewer
@@ -50,6 +50,7 @@ class DeepZoomGenerator(object):
             limit_bounds = False
         self._limit_bounds = limit_bounds
         self._bg_color = '#ffffff'  # Slide background color
+        self.default_format = self.format = format
 
         # Deep Zoom level
         z_size = self._osr.level_dimensions[0]
@@ -109,12 +110,13 @@ class DeepZoomGenerator(object):
         """The total number of Deep Zoom tiles in the image."""
         return sum(t_cols * t_rows for t_cols, t_rows in self.level_tiles)
 
-    def get_tile(self, level, address, format='jpeg'):
+    def get_tile(self, level, address, format=None):
         """Return an RGB(A) PIL.Image for a tile.
         level:     the Deep Zoom level.
         address:   the address of the tile within the level as a (col, row)
                    tuple.
         """
+        format = format or self.default_format
         page, coord, z_size = self.get_tile_info(level, address)
         tile = self._osr.get_patch(x=coord, level=page)
 #         x0, y0, w, h = coord
@@ -140,17 +142,17 @@ class DeepZoomGenerator(object):
         if level < 0 or level >= self._dz_levels:
             raise ValueError(f"Invalid level {level}")
         col, row = address
-        
+
         # Get preferred slide page
         page, coords_osr, coords_dzi = self.page_tile_indices[level]
         coord, (w, h) = coords_osr[row][col], coords_dzi[row][col][2:]
 
         return page, coord, (w, h)
 
-    def get_dzi(self, format='jpeg'):
+    def get_dzi(self, format=None):
         return get_dzi(
             self._osr.level_dimensions[0], 
             tile_size=self.tile_size, 
             overlap=self.overlap, 
-            format=format,
+            format=format or self.default_format,
         )

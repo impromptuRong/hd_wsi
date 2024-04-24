@@ -32,6 +32,7 @@ from matplotlib.patches import Circle, Wedge, Polygon, Rectangle
 from skimage.color import rgb2hsv, hsv2rgb, hed2rgb, rgb2hed, gray2rgb
 # from pycocotools import mask as mask_utils
 
+from skimage.measure._regionprops import RegionProperties
 
 # IMAGE_NET_MEAN_TF = np.array([123.68, 116.779, 103.939])
 # IMAGE_NET_STD_TF = 1.0
@@ -1384,7 +1385,7 @@ def stack_masks(img, val_to_label=None, criteria=lambda x: x.area > 1, channel_a
 
 
 ## regionprops name changed: https://scikit-image.org/docs/0.19.x/release_notes.html?highlight=regionprops
-def split_masks(img, val_to_label, mode='instance', bbox_mode='xyxy', mask_mode='mask',
+def split_masks(img, val_to_label=None, mode='instance', bbox_mode='xyxy', mask_mode='mask',
                 channel_axis=-1, criteria=lambda x: x.area > 1, filled=False, **kwargs):
     """ Transfer a mask image to masks， bboxes and labels. 
     Arguments:
@@ -1425,8 +1426,11 @@ def split_masks(img, val_to_label, mode='instance', bbox_mode='xyxy', mask_mode=
         h, w = [img.shape[_] for _ in range(img.ndim) if _ != channel_axis]
     else:
         h, w = img.shape
-    res = []
     
+    if val_to_label is None:
+        val_to_label = {val: idx for idx, val in enumerate(np.unique(img, axis=channel_axis))}
+
+    res = []
     for val, label in val_to_label.items():
         if channel_axis is not None:
             img_label = np.all(img == val, axis=channel_axis)
@@ -1615,7 +1619,7 @@ class Mask(object):
             return self.poly()
         elif mode.startswith('mask'):
             return self.mask(dtype)
-        elif model.startswith('rle'):
+        elif mode.startswith('rle'):
             return self.rle()
         else:
             raise ValueError(f"{mode} is not supported.")
@@ -1705,7 +1709,7 @@ class Mask(object):
         elif self.mode.startswith('rle'):
             return len(self.m) > 0
         elif self.mode.startswith('mask'):
-            return m.sum() > 0
+            return self.m.sum() > 0
 
 
 class Box(object):
@@ -1716,7 +1720,7 @@ class Box(object):
         self.mode = mode
 
 
-class ObjectProperties(skimage.measure._regionprops.RegionProperties):
+class ObjectProperties(RegionProperties):
     """ Simplify skimage.measure.RegionProperties. 
         Avoid the unnecessary memory cost and computational time to resize and 
         paste model predictions to original image size.
@@ -2308,7 +2312,7 @@ def tiff_page_read_region(page, w0, h0, w, h):
 
             fh.seek(offset)
             data = fh.read(bytecount)
-            tile, indices, shape = page.decode(data, index, jpegtables)
+            tile, indices, shape = page.decode(data, index, jpegtables=jpegtables)
 
             im_h = (i - tile_h0) * tile_height
             im_w = (j - tile_w0) * tile_width
@@ -2466,47 +2470,47 @@ class Slide(object):
         self.level_dims = []
         self.level_downsamples = []
         
-        try:
-            if verbose:
-                print(f"Loading slide: {self.img_file}")
-            with open(self.img_file, 'rb') as fp:
-                slide = TiffFile(fp)
-                self.description = slide.pages[0].description
+#         try:
+        if verbose:
+            print(f"Loading slide: {self.img_file}")
+        with open(self.img_file, 'rb') as fp:
+            slide = TiffFile(fp)
+            self.description = slide.pages[0].description
 
-                # magnification
-                val = re.findall(r'\|((?i:AppMag)|(?i:magnitude)) = (?P<mag>[\d.]+)', self.description)
-                self.magnitude = float(val[0][1]) if val else None
-                if verbose and self.magnitude is None:
-                    print(f"Didn't find magnitude in description.")
+            # magnification
+            val = re.findall(r'((?i:mag)|(?i:magnitude))(\s)*=(\s)*(?P<mag>[\d.]+)', self.description)
+            self.magnitude = float(val[0][-1]) if val else None
+            if verbose and self.magnitude is None:
+                print(f"Didn't find magnitude in description.")
 
-                # mpp
-                val = re.findall(r'\|((?i:MPP)) = (?P<mpp>[\d.]+)', self.description)
-                self.mpp = float(val[0][1]) if val else None
-                if verbose and self.mpp is None:
-                    print(f"Didn't find mpp in description.")
+            # mpp
+            val = re.findall(r'((?i:mpp))(\s)*=(\s)*(?P<mpp>[\d.]+)', self.description)
+            self.mpp = float(val[0][-1]) if val else None
+            if verbose and self.mpp is None:
+                print(f"Didn't find mpp in description.")
 
-                ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
-                level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
-                for page_idx, page in enumerate(slide.pages[1:], 1):
-                    if 'label' in page.description or 'macro' in page.description:
-                        continue
-                    if page.tilewidth == 0 or page.tilelength == 0:
-                        continue
-                    h, w = page.shape[0], page.shape[1]
-                    if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
-                        level_dims.append((w, h))
-                        scales.append(level_dims[0][0]/w)
-                        page_indices.append(page_idx)
-                
-                order = sorted(range(len(scales)), key=lambda x: scales[x])
-                self.page_indices = [page_indices[idx] for idx in order]
-                self.level_dims = [level_dims[idx] for idx in order]
-                self.level_downsamples = [scales[idx] for idx in order]
-                self.n_levels = len(self.level_downsamples)
-        except Exception as e:
-            if verbose:
-                print(f"Failed to load slide: {img_file}.")
-                print(e)
+            ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
+            level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
+            for page_idx, page in enumerate(slide.pages[1:], 1):
+                if 'label' in page.description or 'macro' in page.description:
+                    continue
+                if page.tilewidth == 0 or page.tilelength == 0:
+                    continue
+                h, w = page.shape[0], page.shape[1]
+                if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
+                    level_dims.append((w, h))
+                    scales.append(level_dims[0][0]/w)
+                    page_indices.append(page_idx)
+
+            order = sorted(range(len(scales)), key=lambda x: scales[x])
+            self.page_indices = [page_indices[idx] for idx in order]
+            self.level_dims = [level_dims[idx] for idx in order]
+            self.level_downsamples = [scales[idx] for idx in order]
+            self.n_levels = len(self.level_downsamples)
+#         except Exception as e:
+#             if verbose:
+#                 print(f"Failed to load slide: {img_file}.")
+#                 print(e)
                 # traceback.print_exc()
         
         ## load annotations
@@ -2555,7 +2559,7 @@ class Slide(object):
         elif engine == 'tifffile':
             self._osr_map = {}
         else:
-            raise ValueError(f"Engine: {self.engine} must be one from ['openslide', 'tiffile'].")
+            raise ValueError(f"Engine: {engine} must be one from ['openslide', 'tifffile'].")
         
         self.fh = fh
         self.engine = engine
@@ -2636,8 +2640,10 @@ class Slide(object):
         elif self.engine == 'tifffile':
             # tifffile don't reorder page, so need convertion here. Little bit slow.
             tiff_page_idx = self.page_indices[level] % len(self.fh.pages)
-            patch = tiff_page_read_region(self.fh.pages[tiff_page_idx], x0, y0, w, h)
-            patch = Image.fromarray(patch[0])
+            patch = tiff_page_read_region(self.fh.pages[tiff_page_idx], x0, y0, w, h)[0]
+            if len(patch.shape) == 3 and patch.shape[-1] == 1:  # single channel
+                patch = patch[..., 0]
+            patch = Image.fromarray(patch)
         else:
             raise ValueError(f"Engine: {self.engine} is not supported for reading patch.")
         # print(f"utils_image.get_patch: {t3-t0}, {t4-t3}, {(x0, y0, w, h)}")
