@@ -2569,9 +2569,12 @@ class Slide:
     def filehandle(self):
         return self._fh
 
-    def attach_reader(self, fh, engine='openslide'):
+    def attach_reader(self, fh=None, engine='openslide'):
         ## precalculate some args for read_region
         if engine == 'openslide':
+            if fh is None:
+                from openslide import open_slide
+                fh = open_slide(self.img_file)
             # N = len(fh.level_dimensions)
             # dims = [_ for _ in fh.level_dimensions]
             # self._osr_cfg = {'n_levels': N, 'level_dims': dims, 'level_downsamples': scales,}
@@ -2581,8 +2584,13 @@ class Slide:
                       for lvl, osr_level in enumerate(levels)]
             self._osr_map = {'levels': levels, 'scales': scales,}
         elif engine == 'tifffile':
+            if fh is None:
+                fh = TiffFile(self.img_file)
             self._osr_map = {}
         elif engine == 'simpletiff':
+            if fh is None:
+                from simpletiff import SimpleTiff
+                fh = SimpleTiff(self.img_file)
             self._osr_map = {}
         else:
             raise ValueError(f"Engine: {engine} must be one from ['openslide', 'tifffile', 'simpletiff'].")
@@ -2729,12 +2737,15 @@ class Slide:
         # Use the lowest resolution
         if isinstance(image_size, numbers.Number):
             level = image_size
+            w, h = self.level_dims[level]
+            w_m, h_m = (w, h)
         else:
-            level = self.get_resize_level(image_size or (1024, 1024))
-
-        w, h = self.level_dims[level]
-        scale = min(1024 / w, 1024 / h)
-        w_m, h_m = round(w * scale), round(h * scale)
+            image_size = image_size or (1024, 1024)
+            level = self.get_resize_level(image_size)
+            w, h = self.level_dims[level]
+            scale = min(image_size[0] / w, image_size[1] / h)
+            w_m, h_m = round(w * scale), round(h * scale)
+            
         img = cv2.resize(self.get_page(level), (w_m, h_m), interpolation=cv2.INTER_LINEAR)
         img = rgba2rgb(img, background=bg)
 

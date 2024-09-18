@@ -21,7 +21,7 @@ import matplotlib
 import skimage.morphology
 
 from .utils_image import random_sampling_in_polygons, binary_mask_to_polygon, polygon_areas, ObjectProperties
-from .utils_wsi import ObjectIterator
+
 
 
 """ Nuclei feature codes:
@@ -187,7 +187,10 @@ def scatter_plot(nuclei_map, r_ave, labels_color, scale_factor=1./64):
 
 def density_plot(cloud_d, scale_factor):
     # d_map = torch.stack([cloud_d[1]/cloud_d[1].max(), cloud_d[0]/cloud_d[0].max()/1.5, cloud_d[2]/cloud_d[2].max()]) * 3
-    d_map = torch.stack([cloud_d[1], cloud_d[0], cloud_d[2]]) / scale_factor * 3
+    img_size = cloud_d[0].shape
+    empty_img = torch.zeros(img_size)
+    channels = [cloud_d.get(1, empty_img), cloud_d.get(0, empty_img), cloud_d.get(2, empty_img)]
+    d_map = torch.stack(channels) / scale_factor * 3
     # d_map = torch.nn.functional.interpolate(d_map[None], scale_factor=scale_factor)[0]
     # t_l = d_map[1] * d_map[2]
     d_map = d_map.permute(1, 2, 0).numpy()
@@ -263,9 +266,12 @@ def polygons2mask(polygons, shape, scale=1.):
     """ Use cv2.fillPoly to be consistent with (w, h) pattern.
     """
     mask = np.zeros((shape[1], shape[0]))
-    polygons = [((np.array(_) * scale)).astype(np.int32) 
-                for _ in polygons]
-    cv2.fillPoly(mask, polygons, 1)
+    poly_fix = [((np.array(_) * scale)).astype(np.int32) 
+                for _ in polygons if len(_)]
+    if polygons:
+        cv2.fillPoly(mask, poly_fix, 1)
+    else:
+        print(f"Invalid polygons: {polygons}.")
 
     return mask.astype(bool)
 
@@ -320,7 +326,10 @@ def _regionprops(box, label, mask):
     h = max((box[3] - box[1] + TO_REMOVE).item(), 1)
     o = {'box_area': h * w, 'labels': label.item()}
 
-    mask = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR) > 0.5
+    if isinstance(mask[0], torch.Tensor):
+        mask = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR) > 0.5
+    else:
+        mask = polygons2mask(mask, shape=(w, h))
     if mask.sum():
         prop = ObjectProperties(box.numpy(), mask)
         o.update({k: fn(prop) for k, fn in REGIONPROP_FEATURES.items()})

@@ -7,6 +7,7 @@ from collections import Counter
 from utils.utils_features import *
 from utils.utils_image import Slide
 from utils.utils_wsi import folder_iterator
+from utils.utils_wsi import ObjectIterator
 
 SEED = 42
 SCALE_FACTOR = 32

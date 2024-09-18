@@ -14,6 +14,7 @@ MODEL_PATHS = {
     'nucls3': './selected_models/benchmark_nucls_paper/fold3_epoch201.float16.torchscript.pt',
     'nucls4': './selected_models/benchmark_nucls_paper/fold4_epoch102.float16.torchscript.pt',
     'nucls5': './selected_models/benchmark_nucls_paper/fold5_epoch127.float16.torchscript.pt',
+    'colonv8': './selected_models/benchmark_colon/best.pt',
 }
 
 DATASETS = {

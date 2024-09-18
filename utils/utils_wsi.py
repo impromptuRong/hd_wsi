@@ -4,6 +4,7 @@ import math
 import time
 import random
 import pickle
+import psutil
 import numbers
 import skimage
 import datetime
@@ -419,6 +420,72 @@ def yolov5_inference(model, data_loader, input_size=640, compute_masks=True, dev
     return {k: torch.cat(v) for k, v in results.items()}
 
 
+# TODO: using multiprocessing.Queue for producer/consumer without IO blocking.
+def analyze_one_slide(model, dataset, batch_size=64, n_workers=64, 
+                      compute_masks=True, nms_params={}, device=torch.device('cpu'), 
+                      export_masks=None, max_mem=None):
+    _byte2mb = lambda x: x / 1e6
+    max_mem = max_mem or _byte2mb(psutil.virtual_memory().free * 0.8)
+    input_size = dataset.model_input_size
+    N_patches = len(dataset)
+    data_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=batch_size, 
+        num_workers=n_workers, shuffle=False,
+        pin_memory=True,
+    )
+
+    model.eval()
+    t0 = time.time()
+    print(f"Inferencing: ", end="")
+    generator = yolo_inference_iterator(
+        model, data_loader, 
+        input_size=input_size,
+        compute_masks=compute_masks, 
+        device=device, **nms_params,
+    )
+
+    results = defaultdict(list)
+    masks, mask_mem, file_index = [], 0, 0
+    for o in generator:
+        for k, v in o.items():
+            if k != 'masks':
+                results[k].append(v.cpu())
+            else:
+                mask_tensor = v.cpu()
+                masks.append(mask_tensor)
+                mask_mem += _byte2mb(sys.getsizeof(mask_tensor.storage()))
+                avail_mem = min(max_mem, _byte2mb(psutil.virtual_memory().free * 0.8))
+                # print(f"Track memory usage: {mask_mem}, {mask_mem/max_mem}")
+                if export_masks and mask_mem >= avail_mem:
+                    file_index += 1
+                    filename = f"{export_masks}_{file_index:0{len(str(N_patches))}}"
+                    torch.save(torch.cat(masks), filename)
+                    while masks:
+                        ele = masks.pop()
+                        del ele
+                    mask_mem = 0
+    
+    if export_masks and masks:
+        if file_index == 0:
+            filename = export_masks
+        else:
+            file_index += 1
+            filename = f"{export_masks}_{file_index:0{len(str(N_patches))}}"
+        torch.save(torch.cat(masks), filename)
+        while masks:
+            ele = masks.pop()
+            del ele
+            mask_mem = 0
+
+    res = {k: torch.cat(v) for k, v in results.items()}
+    if masks:
+        res['masks'] = torch.cat(masks)
+    t1 = time.time()
+    print(f"{t1-t0} s")
+
+    return {'cell_stats': res, 'inference_time': t1-t0}
+
+
 class ObjectIterator(object):
     def __init__(self, boxes, labels, scores=None, masks=None, keep_fn=None):
         self.boxes = boxes
@@ -439,7 +506,7 @@ class ObjectIterator(object):
             else:
                 self.partitions = None
                 self.masks = None
-        elif isinstance(masks, torch.Tensor):
+        elif isinstance(masks, torch.Tensor) or isinstance(masks, list):
             self.partitions = []
             self.masks = deque(masks)
         else:
@@ -484,9 +551,12 @@ def export_detections_to_table(object_iterator, converter=None, labels_text=None
         entry = box.tolist() + [round(score.item(), 4), label]
 
         if save_masks and mask is not None:
-            # mask = F.interpolate(mask[None].float(), size=(h, w), mode="bilinear", align_corners=False)[0][0]
-            mask = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR)
-            mask = Mask(mask > 0.5, size=[h, w], mode='mask').poly()
+            if isinstance(mask, list):  # we got a polygon
+                mask = Mask(mask, size=[h, w], mode='poly').poly()
+            else:
+                # mask = F.interpolate(mask[None].float(), size=(h, w), mode="bilinear", align_corners=False)[0][0]
+                mask = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR)
+                mask = Mask(mask > 0.5, size=[h, w], mode='mask').poly()
             if mask.m:
                 poly = (mask.m[0] + [box[0], box[1]]).T
                 poly_x = ','.join([f'{_:.2f}' for _ in poly[0]])
@@ -527,12 +597,14 @@ def export_detections_to_image(object_iterator, img_size, labels_color, save_mas
         y_0 = max(b_1, 0)
         y_1 = min(b_3 + 1, h_s)
 
-        if label > 0 and x_0 < x_1 and y_0 < y_1:  # ignore unclassified and out of bounds
+        if label > 0 and x_0 < x_1 and y_0 < y_1 and w > 0 and h > 0:  # ignore unclassified and out of bounds
             col_label = (label.item() if label > 0 else max_val + 1)
             if save_masks and mask is not None:  # draw mask
                 if isinstance(mask, list):  # we got a polygon
-                    mask_obj = np.zeros((h, w))
-                    cv2.fillPoly(mask_obj, pts=[_.astype(np.int32)-np.array([b_0, b_1]) for _ in mask], color=col_label)
+                    mask_obj = np.zeros((h, w), dtype=np.uint8)
+                    polys = [_.astype(np.int32) for _ in mask if len(_)]
+                    if polys:
+                        cv2.fillPoly(mask_obj, pts=polys, color=col_label)
                 else:
                     # mask_obj = F.interpolate(mask[None].float(), size=(h, w), mode="bilinear", align_corners=False)[0][0]
                     mask_obj = cv2.resize(mask[0].float().numpy(), (w, h), interpolation=cv2.INTER_LINEAR)

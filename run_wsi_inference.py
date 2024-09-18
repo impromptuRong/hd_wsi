@@ -2,7 +2,6 @@ import os
 import sys
 import time
 import torch
-import psutil
 import argparse
 import datetime
 from PIL import Image
@@ -13,87 +12,27 @@ from collections import defaultdict
 from utils.utils_image import Slide
 from utils.utils_wsi import ObjectIterator, WholeSlideDataset, folder_iterator
 from utils.utils_wsi import get_slide_and_ann_file, generate_roi_masks
-from utils.utils_wsi import load_cfg, load_hdyolo_model, yolo_inference_iterator
 from utils.utils_wsi import export_detections_to_image, export_detections_to_table, wsi_imwrite
-
-
-# TODO: using multiprocessing.Queue for producer/consumer without IO blocking.
-def analyze_one_slide(model, dataset, batch_size=64, n_workers=64, 
-                      compute_masks=True, nms_params={}, device=torch.device('cpu'), 
-                      export_masks=None, max_mem=None):
-    _byte2mb = lambda x: x / 1e6
-    max_mem = max_mem or _byte2mb(psutil.virtual_memory().free * 0.8)
-    input_size = dataset.model_input_size
-    N_patches = len(dataset)
-    data_loader = torch.utils.data.DataLoader(
-        dataset, batch_size=batch_size, 
-        num_workers=n_workers, shuffle=False,
-        pin_memory=True,
-    )
-
-    model.eval()
-    t0 = time.time()
-    print(f"Inferencing: ", end="")
-    generator = yolo_inference_iterator(
-        model, data_loader, 
-        input_size=input_size,
-        compute_masks=compute_masks, 
-        device=device, **nms_params,
-    )
-
-    results = defaultdict(list)
-    masks, mask_mem, file_index = [], 0, 0
-    for o in generator:
-        for k, v in o.items():
-            if k != 'masks':
-                results[k].append(v.cpu())
-            else:
-                mask_tensor = v.cpu()
-                masks.append(mask_tensor)
-                mask_mem += _byte2mb(sys.getsizeof(mask_tensor.storage()))
-                avail_mem = min(max_mem, _byte2mb(psutil.virtual_memory().free * 0.8))
-                # print(f"Track memory usage: {mask_mem}, {mask_mem/max_mem}")
-                if export_masks and mask_mem >= avail_mem:
-                    file_index += 1
-                    filename = f"{export_masks}_{file_index:0{len(str(N_patches))}}"
-                    torch.save(torch.cat(masks), filename)
-                    while masks:
-                        ele = masks.pop()
-                        del ele
-                    mask_mem = 0
-    
-    if export_masks and masks:
-        if file_index == 0:
-            filename = export_masks
-        else:
-            file_index += 1
-            filename = f"{export_masks}_{file_index:0{len(str(N_patches))}}"
-        torch.save(torch.cat(masks), filename)
-        while masks:
-            ele = masks.pop()
-            del ele
-            mask_mem = 0
-
-    res = {k: torch.cat(v) for k, v in results.items()}
-    if masks:
-        res['masks'] = torch.cat(masks)
-    t1 = time.time()
-    print(f"{t1-t0} s")
-
-    return {'cell_stats': res, 'inference_time': t1-t0}
 
 
 def main(args):
     if args.model in CONFIGS.MODEL_PATHS:
         args.model = CONFIGS.MODEL_PATHS[args.model]
+    if args.model.endswith('.torchscript.pt'):
+        from utils.utils_wsi import load_cfg, analyze_one_slide
+        from utils.utils_wsi import load_hdyolo_model as load_model
+    else:
+        from utils.utils_wsi_yolov8 import load_cfg, analyze_one_slide
+        from utils.utils_wsi_yolov8 import load_yolov8_model as load_model
+
     print("==============================")
     if args.device == 'cuda' and not torch.cuda.is_available():
         print(f"Cuda is not available, use cpu instead.")
         args.device = 'cpu'
     device = torch.device(args.device)
     try:
-        model = load_hdyolo_model(args.model, device=device, nms_params=CONFIGS.NMS_PARAMS)
-        print(f"Load hdyolo model: {args.model} to {args.device} (nms: {model.headers.det.nms_params}")
+        model = load_model(args.model, device=device, nms_params=CONFIGS.NMS_PARAMS)
+        print(f"Load hdyolo model: {args.model} to {args.device}") # (nms: {model.headers.det.nms_params}
     except:
         raise ValueError(f"Failed to load {args.model} to {args.device}.")
 
