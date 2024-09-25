@@ -619,6 +619,10 @@ def export_detections_to_image(object_iterator, img_size, labels_color, save_mas
     return F.embedding(img_label, color_tensor).numpy()
 
 
+def to_ascii(s):
+    return ''.join(c for c in s if ord(c) < 128)
+
+
 def wsi_imwrite(image, filename, header, slide_info, tiff_params, bigtiff=False, scales=None, **kwargs):
     w0, h0 = image.shape[1], image.shape[0]
     if len(image.shape) == 2:  # single channel
@@ -648,7 +652,7 @@ def wsi_imwrite(image, filename, header, slide_info, tiff_params, bigtiff=False,
         for k, v in kwargs.items():
             descp += f'|{k} = {v}'
         # resolution=(mpp * 1e-4, mpp * 1e-4, 'CENTIMETER')
-        tif.write(image, metadata=None, description=descp, subfiletype=0, **tiff_params,)  # subifds=len(scales), 
+        tif.write(image, metadata=None, description=to_ascii(descp), subfiletype=0, **tiff_params,)  # subifds=len(scales), 
 
         for scale in scales:
             w, h = w0 // scale, h0 // scale

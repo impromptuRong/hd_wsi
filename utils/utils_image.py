@@ -2569,12 +2569,12 @@ class Slide:
     def filehandle(self):
         return self._fh
 
-    def attach_reader(self, fh=None, engine='openslide'):
+    def attach_reader(self, fh=None, engine='openslide', **kwargs):
         ## precalculate some args for read_region
         if engine == 'openslide':
             if fh is None:
                 from openslide import open_slide
-                fh = open_slide(self.img_file)
+                fh = open_slide(self.img_file, **kwargs)
             # N = len(fh.level_dimensions)
             # dims = [_ for _ in fh.level_dimensions]
             # self._osr_cfg = {'n_levels': N, 'level_dims': dims, 'level_downsamples': scales,}
@@ -2585,12 +2585,12 @@ class Slide:
             self._osr_map = {'levels': levels, 'scales': scales,}
         elif engine == 'tifffile':
             if fh is None:
-                fh = TiffFile(self.img_file)
+                fh = TiffFile(self.img_file, **kwargs)
             self._osr_map = {}
         elif engine == 'simpletiff':
             if fh is None:
                 from simpletiff import SimpleTiff
-                fh = SimpleTiff(self.img_file)
+                fh = SimpleTiff(self.img_file, **kwargs)
             self._osr_map = {}
         else:
             raise ValueError(f"Engine: {engine} must be one from ['openslide', 'tifffile', 'simpletiff'].")

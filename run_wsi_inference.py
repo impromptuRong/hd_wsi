@@ -41,7 +41,7 @@ def main(args):
     print(f"Dataset configs: {dataset_configs}")
 
     if os.path.isdir(args.data_path):
-        keep_fn = lambda x: os.path.splitext(x)[1] in ['.svs', '.tiff']
+        keep_fn = lambda x: os.path.splitext(x)[1] in ['.svs', '.tiff', '.tif', '.ndpi']
         slide_files = list(folder_iterator(args.data_path, keep_fn))
     else:
         rel_path = os.path.basename(args.data_path)
@@ -65,7 +65,8 @@ def main(args):
                 osr = Slide(*get_slide_and_ann_file(slide_file))
                 roi_masks = generate_roi_masks(osr, args.roi)
                 dataset = WholeSlideDataset(osr, masks=roi_masks, processor=None, **dataset_configs)
-                osr.attach_reader(open_slide(osr.img_file))
+                osr.attach_reader(engine=args.engine)  # engine='openslide', 'tifffile'
+                print(f"Load image with engine: {args.engine}")
                 print(dataset.info())
             except Exception as e:
                 print(f"Failed to create slide dataset for: {slide_file}.")
@@ -173,6 +174,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', default=None, type=str, help="Output folder.")
     parser.add_argument('--device', default='cuda', choices=['cuda', 'cpu'], type=str, help='Run on cpu or gpu.')
     parser.add_argument('--roi', default='tissue', type=str, help='ROI region.')
+    parser.add_argument('--engine', default='openslide', type=str, help='image reader engine, one of [openslide, tifffile].')
     parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
     parser.add_argument('--num_workers', default=64, type=int, help='Number of workers for data loader.')
     parser.add_argument('--max_memory', default=None, type=int, 
