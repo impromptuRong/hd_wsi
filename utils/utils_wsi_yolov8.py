@@ -50,10 +50,14 @@ def load_yolov8_model(model, device='cpu', nms_params={}):
         model.fuse()
         model.nms_params = {}
         for k, v in nms_params.items():
-            if 'conf_thres' in nms_params:
-                model.nms_params['conf'] = nms_params['conf_thres']
-            elif 'iou_thres' in nms_params:
-                model.nms_params['iou'] = nms_params['iou_thres']
+            if k == 'conf_thres':
+                model.nms_params['conf'] = nms_params[k]
+            elif k == 'iou_thres':
+                model.nms_params['iou'] = nms_params[k]
+            elif k == 'agnostic':
+                model.nms_params['agnostic_nms'] = nms_params[k]
+            elif k in ['multi_label', 'labels']:
+                continue
             else:
                 model.nms_params[k] = v
     
@@ -84,14 +88,17 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
 
     res = []
     outputs = model(inputs, verbose=False, **model.nms_params)
+    outer_st = time.time()
     for r, info in zip(outputs, patch_infos):
-        r = r.cpu()
+        # r = r.cpu()
+        st = time.time()
         o = pred = {
-            'boxes': r.boxes.xyxy.clone(), 
-            'labels': r.boxes.cls.clone() + 1, 
-            'scores': r.boxes.conf.clone(), 
+            'boxes': r.boxes.xyxy,  # .clone(), 
+            'labels': r.boxes.cls + 1,  # .clone() + 1, 
+            'scores': r.boxes.conf,  # .clone(), 
             'masks': r.masks.xy if r.masks else [], 
         }
+        # print("extract time", time.time() - st)
 
         if score_threshold > 0.:
             keep = o['scores'] >= score_threshold
@@ -99,15 +106,15 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
 
         if iou_threshold < 1.:
             keep = torchvision.ops.nms(o['boxes'], o['scores'], iou_threshold=iou_threshold)
-            o = {k: [v[keep] for idx in keep] if isinstance(v, list) else v[keep] for k, v in o.items()}
-
+            o = {k: [v[idx] for idx in keep] if isinstance(v, list) else v[keep] for k, v in o.items()}
+        
         if len(o['boxes']):
             # trim border objects, map to original coords
-            o['boxes'][:, [0, 2]] *= w_ori/w  # rescale to image size
-            o['boxes'][:, [1, 3]] *= h_ori/h
+            scaler = torch.tensor([w_ori/w, h_ori/h, w_ori/w, h_ori/h], dtype=o['boxes'].dtype, device=o['boxes'].device)
+            o['boxes'] = o['boxes'] * scaler  # rescale to image size
             
             if 'masks' in o:
-                o['masks'] = [[m * np.array([w_ori/w, h_ori/h]) - box[:2].numpy()]
+                o['masks'] = [[m * np.array([w_ori/w, h_ori/h]) - box[:2].cpu().numpy()]
                               for m, box in zip(o['masks'], o['boxes'])]
 
             x0_s, y0_s, w_p, h_p, x0_p, y0_p = info
@@ -121,6 +128,8 @@ def batch_inference(model, images, patch_infos, input_size, compute_masks=True,
             o['boxes'][:, [1, 3]] += y0_s - y0_p
 
         res.append(o)
+        
+    # print("post processing", time.time()-outer_st)
 
     return res
 
@@ -147,10 +156,12 @@ def yolo_inference_iterator(model, data_loader, input_size=640, compute_masks=Tr
     with torch.no_grad():
         for images, patch_infos in data_loader:
             images = images.to(device, model_dtype, non_blocking=True)
+            st = time.time()
             r = batch_inference(model, images, patch_infos, 
                                 input_size=(h, w), compute_masks=compute_masks, 
                                 score_threshold=score_threshold, 
                                 iou_threshold=iou_threshold)
+            # print("batch_inference total time:", time.time() - st)
             for o in r:
                 yield o
 

@@ -41,13 +41,14 @@ conda env create -n hd_env --file environment.yaml
 conda activate hd_env
 ```
 
-Step 3. Download pretrained models. We provide 2 pretrained `HD-Yolo` models for lung cancer and breast cancer. Download the pretrained models from the list below and make sure the paths to these models are consistent with the `MODEL_PATHS` parameters in the `configs.py`.
+Step 3. Download pretrained models. We provide 2 pretrained `HD-Yolo` models for lung cancer and breast cancer, plus one pretrained `Yolov8` model for colon cancer. Download the pretrained models from the list below and make sure the paths to these models are consistent with the `MODEL_PATHS` parameters in the `configs.py`.
 <ul>
    <li> <a href="https://drive.google.com/file/d/131RQwmrQeonwuLr46L06gWZ8Jv60opSt/view?usp=share_link">lung cancer model</a> </li>
    <li> <a href="https://drive.google.com/file/d/131zR4g-V1wmjXBhmzuEGnqt-ttzNuSPK/view?usp=share_link">breast cancer model</a> </li>
+    <li> <a href="https://drive.google.com/file/d/1Vet8_MZqrK247TqRWiG4PUfIalP1LkgS/view?usp=sharing">colon cancer Yolov8 model</a> </li>
 </ul>
 
-When using customized model, be sure the [torchscript](https://pytorch.org/docs/stable/jit.html) model will output the results in the format `(losses: Optional, outputs: Dict[str, torch.Tensor])` with required keys: `'boxes'`, `'labels'`, `'scores'`, and optional keys `'masks'`, `'keypoints'`, etc in `outputs`. (See [torchvision MaskRCNN](https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#defining-the-dataset) format for details). 
+When using customized [torchscript](https://pytorch.org/docs/stable/jit.html) model, be sure the model will output the results in the format `(losses: Optional, outputs: Dict[str, torch.Tensor])` with required keys: `'boxes'`, `'labels'`, `'scores'`, and optional keys `'masks'`, `'keypoints'`, etc in `outputs`. (See [torchvision MaskRCNN](https://pytorch.org/tutorials/intermediate/torchvision_tutorial.html#defining-the-dataset) format for details). When using the [ultralytics](https://github.com/ultralytics) `Yolo` model, be sure to use the original pytorch model ends with `'.pt'`.
 
 
 ### Install with docker
@@ -221,7 +222,7 @@ The user interface is simple: i). Select a slide, model, and device from the dro
 
 ### b) Whole slide nuclei detection and segmentation
 1. `slide_id.pt`: The compressed object contains slide information, nuclei locations, scores and types, as well as inference time.
-2. `slide_id.masks.pt`: If model outputs masks and `--box_only` is not enabled, all nuclei masks shrinked into 28x28 pixel are stored in this file.
+2. `slide_id.masks.pt`: If model outputs masks and `--box_only` is not enabled. For `HDYolo` model, all nuclei masks shrinked into 28x28 pixel are stored in this file. For `ultralytics Yolo` model, nuclei masks are stored as polygons in this file.
 3. `slide_id.tiff`: If `--save_img` is enabled, script will plot a large pyramid tiff image with the same size as input slide (nuclei color are provided through `--meta_info` with default transparency = 0.3). This file can be viewed through [openslide](https://openslide.org) and other tiff viewers. Don't enable this option for large image as it will take extremely long time to plot and save.
 4. `slide_id.csv`: If `--save_csv` is enabled, script will export `boxes`, `scores`, `labels` into this csv file. If `--export_text` is enabled, script will replace numeric labels with text labels defined in `--meta_info`. If `--export_mask` is enabled, an extra column contains masks in polygon format will be added to the csv file. Note that TME feature extraction pipeline takes `slide_id.pt` as input, the csv file is not necessary for downstream analysis. Export csv with text and masks will cost extra time and take more space.
 
@@ -252,7 +253,7 @@ A Deep Learning Approach for Histology-Based Nuclei Segmentation and Tumor Micro
 If you have any questions or suggestions, please contact the following:
 
 Developer: Ruichen Rong (ruichen.rong@utsouthwestern.edu)<br>
-Maintainer: Hudanyun Sheng (hudanyun.sheng@utsouthwestern.edu)<br>
+Maintainer: Peiran Quan (peiran.quan@utsouthwestern.edu)<br>
 Corresponding: Shidan Wang (shidan.wang@utsouthwestern.edu)<br>
 Corresponding: Xiaowei Zhan (xiaowei.zhan@utsouthwestern.edu)<br>
 Corresponding: Guanghua Xiao (guanghua.xiao@utsouthwestern.edu)</br>
