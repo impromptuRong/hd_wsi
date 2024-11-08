@@ -2,8 +2,10 @@ import os
 import sys
 import time
 import torch
+import skimage
 import argparse
 import datetime
+import numpy as np
 from PIL import Image
 from openslide import open_slide
 
@@ -63,6 +65,7 @@ def main(args):
             t0 = time.time()
             try:
                 osr = Slide(*get_slide_and_ann_file(slide_file))
+                slide_img = osr.thumbnail((1024, 1024))
                 roi_masks = generate_roi_masks(osr, args.roi)
                 dataset = WholeSlideDataset(osr, masks=roi_masks, processor=None, **dataset_configs)
                 osr.attach_reader(engine=args.engine)  # engine='openslide', 'tifffile'
@@ -85,6 +88,7 @@ def main(args):
             outputs['slide_info'] = dataset.slide.info
             outputs['slide_size'] = dataset.slide_size
             outputs['model'] = args.model
+            outputs['thumbnail'] = slide_img
             outputs['rois'] = dataset.masks
 
             # we save nuclei masks in a separate file to speed up features extraction without mask.
@@ -101,6 +105,30 @@ def main(args):
         else:
             outputs = {}
 
+        if args.save_thumbnail:
+            thumbnail_file = os.path.join(output_dir, f"{slide_id}.thumbnail.png")
+            if not os.path.exists(thumbnail_file):
+                if not outputs:
+                    outputs = torch.load(res_file)
+                thumbnail_img = outputs.get('thumbnail', None)
+                if thumbnail_img is not None:
+                    print(f"Saving slide thumbnail. ")
+                    skimage.io.imsave(thumbnail_file, (thumbnail_img * 255.0).astype(np.uint8))
+                else:
+                    print(f"Missing slide thumbnail. ")
+
+        if args.save_roi:
+            roi_file = os.path.join(output_dir, f"{slide_id}.roi.png")
+            if not os.path.exists(roi_file):
+                if not outputs:
+                    outputs = torch.load(res_file)
+                roi_img = outputs.get('rois', None)
+                if roi_img is not None:
+                    print(f"Saving roi region. ")
+                    skimage.io.imsave(roi_file, (roi_img * 255.0).astype(np.uint8))
+                else:
+                    print(f"Missing roi image. ")
+
         if args.save_img or args.save_csv:
             if not outputs:
                 outputs = torch.load(res_file)
@@ -113,13 +141,13 @@ def main(args):
                     param_masks = torch.load(res_file_masks)
                 else:
                     param_masks = res_file_masks
-        
+
         if args.save_img:
             img_file = os.path.join(output_dir, f"{slide_id}.tiff")
             if not os.path.exists(img_file):
                 print(f"Exporting result to image: ", end="")
                 t0 = time.time()
-                
+
                 object_iterator = ObjectIterator(
                     boxes=outputs['cell_stats']['boxes'], 
                     labels=outputs['cell_stats']['labels'], 
@@ -178,8 +206,10 @@ if __name__ == '__main__':
     parser.add_argument('--batch_size', default=64, type=int, help='Number of batch size.')
     parser.add_argument('--num_workers', default=64, type=int, help='Number of workers for data loader.')
     parser.add_argument('--max_memory', default=None, type=int, 
-                        help='Maximum MB to store masks in memory. Default is 80%% of free memory.')
+                        help='Maximum MB to store masks in memory. Default is 80% of free memory.')
     parser.add_argument('--box_only', action='store_true', help="Only save box and ignore mask.")
+    parser.add_argument('--save_thumbnail', action='store_true', help="Save slide thumbnail as image.")
+    parser.add_argument('--save_roi', action='store_true', help="Save region of interest as image.")
     parser.add_argument('--save_img', action='store_true', 
                         help="Plot nuclei box/mask into png, don't enable this option for large image.")
     parser.add_argument('--save_csv', action='store_true', 

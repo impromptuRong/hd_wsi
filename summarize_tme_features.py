@@ -67,6 +67,7 @@ def main(args):
                 # [res['cell_stats'], res['rois'], res['slide_size'], res['slide_info'], slide['meta_info']]
                 res_nuclei, slide_size = res['cell_stats'], res['slide_size']
                 slide_info, meta_info = res['slide_info'], res['meta_info']
+                slide_img, slide_roi = res.get('thumbnail', None), res.get('rois', None)
                 print(f"Find results for: slide_id={slide_id}, magnitude={slide_info['magnitude']}, mpp={slide_info['mpp']}, slide_size={slide_info['level_dims'][0]}")
 
                 mpp_scale = slide_info['mpp']/args.default_mpp
@@ -127,19 +128,19 @@ def main(args):
                 density_img = density_plot(cloud_d, scale_factor=1./args.scale_factor)
 
                 # load a thumbnail image
-                try:
-                    if 'img_file' in slide_info:
-                        svs_file = os.path.join(args.data_path, slide_info['img_file'])
-                    else:
-                        svs_file = os.path.join(args.data_path, slide_info['svs_file'])  # compatible to old code
-                    xml_file = slide_info.get('xml_file') 
-                    xml_file = os.path.join(args.data_path, xml_file) if xml_file is not None else None
-                    slide = Slide(svs_file, xml_file, verbose=False)
-                    slide_img = slide.thumbnail((1024, 1024))
-                except:
-                    print(f"Didn't find the original slide: {svs_file}. Will skip slide thumbnail image.")
-                    slide = None
-                    slide_img = None
+                if slide_img is None:
+                    try:
+                        if 'img_file' in slide_info:
+                            svs_file = os.path.join(args.data_path, slide_info['img_file'])
+                        else:
+                            svs_file = os.path.join(args.data_path, slide_info['svs_file'])  # compatible to old code
+                        xml_file = slide_info.get('xml_file') 
+                        xml_file = os.path.join(args.data_path, xml_file) if xml_file is not None else None
+                        slide = Slide(svs_file, xml_file, verbose=False)
+                        slide_img = slide.thumbnail((1024, 1024))
+                    except:
+                        print(f"Didn't find the original slide: {svs_file}. Will skip slide thumbnail image.")
+                        slide_img = None
                 t3 = time.time()
 
                 output = {

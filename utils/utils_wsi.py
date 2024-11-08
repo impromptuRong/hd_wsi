@@ -114,7 +114,7 @@ def processor(patch, info, **kwargs):
 def generate_roi_masks(slide, masks='tissue'):
     if isinstance(masks, str):
         if masks == 'tissue':
-            res = slide.roughly_extract_tissue_region((512, 512), bg=255)
+            res = slide.roughly_extract_tissue_region((1024, 1024), bg=255)
         elif masks == 'all':
             res = None
         elif masks == 'xml':
@@ -453,7 +453,7 @@ def analyze_one_slide(model, dataset, batch_size=64, n_workers=64,
             else:
                 mask_tensor = v.cpu()
                 masks.append(mask_tensor)
-                mask_mem += _byte2mb(sys.getsizeof(mask_tensor.storage()))
+                mask_mem += _byte2mb(sys.getsizeof(mask_tensor.untyped_storage()))
                 avail_mem = min(max_mem, _byte2mb(psutil.virtual_memory().free * 0.8))
                 # print(f"Track memory usage: {mask_mem}, {mask_mem/max_mem}")
                 if export_masks and mask_mem >= avail_mem:

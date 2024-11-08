@@ -2280,12 +2280,13 @@ def tiff_page_read_region(page, w0, h0, w, h):
     out : ndarray of shape (imagedepth, h, w, sampleperpixel)
         Extracted crop.
     """
-
-    if not page.is_tiled:
+    # page will be either a tifffile.TiffPage or a tifffile.TiffFrame
+    # For members not in page, use values from page.keyframe (must be a TiffPage)
+    if not page.keyframe.is_tiled:
         raise ValueError("Input page must be tiled.")
 
-    im_width = page.imagewidth
-    im_height = page.imagelength
+    im_width = page.keyframe.imagewidth
+    im_height = page.keyframe.imagelength
 
     if h < 1 or w < 1:
         raise ValueError("h and w must be strictly positive.")
@@ -2293,7 +2294,7 @@ def tiff_page_read_region(page, w0, h0, w, h):
 #     if h0 < 0 or w0 < 0 or h0 + h >= im_height or w0 + w >= im_width:
 #         raise ValueError("Requested crop area is out of image bounds.")
 
-    tile_width, tile_height = page.tilewidth, page.tilelength
+    tile_width, tile_height = page.keyframe.tilewidth, page.keyframe.tilelength
     h1, w1 = h0 + h, w0 + w
     h0, w0 = max(0, h0), max(0, w0)
     h1, w1 = min(h0 + h, im_height), min(w0 + w, im_width)
@@ -2303,16 +2304,17 @@ def tiff_page_read_region(page, w0, h0, w, h):
 
     tile_per_line = int(np.ceil(im_width / tile_width))
 
-    out = np.empty((page.imagedepth,
+    out = np.empty((page.keyframe.imagedepth,
                     (tile_h1 - tile_h0) * tile_height,
                     (tile_w1 - tile_w0) * tile_width,
-                    page.samplesperpixel), dtype=page.dtype)
+                    page.keyframe.samplesperpixel), dtype=page.dtype)
 
     fh = page.parent.filehandle
 
-    jpegtables = page.tags.get('JPEGTables', None)
+    jpegtables = page.keyframe.tags.get('JPEGTables', None)
     if jpegtables is not None:
         jpegtables = jpegtables.value
+    # jpegtables = page.jpegtables
 
     for i in range(tile_h0, tile_h1):
         for j in range(tile_w0, tile_w1):
@@ -2496,7 +2498,7 @@ class Slide:
                     self.attach_reader(fh, engine='tifffile')
         except Exception as e:
             print(f"Failed to load slide: {img_file}.")
-            print(e)        
+            print(e)
         
         self.slide_id = slide_id or os.path.splitext(os.path.basename(self.img_file))[0]
 
@@ -2533,23 +2535,65 @@ class Slide:
             print(f"Didn't find mpp in description.")
 
         ## level_dims consistent with open_slide: (w, h), (OriginalHeight, OriginalWidth)
-        level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
-        for page_idx, page in enumerate(slide.pages[1:], 1):
-            if 'label' in page.description or 'macro' in page.description:
-                continue
-            if page.tilewidth == 0 or page.tilelength == 0:
-                continue
-            h, w = page.shape[0], page.shape[1]
-            if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
+        if isinstance(slide, TiffFile):
+            ## We will use slide.series for level extraction.
+            series = 0
+            axis_map = {name: idx for idx, name in enumerate(slide.series[series].dims)}
+            level_dims, scales, page_indices = [], [], []
+            for page_idx, page in enumerate(slide.series[series].levels):
+                h, w = page.shape[axis_map['height']], page.shape[axis_map['width']]
                 level_dims.append((w, h))
                 scales.append(level_dims[0][0]/w)
                 page_indices.append(page_idx)
 
-        order = sorted(range(len(scales)), key=lambda x: scales[x])
-        self.page_indices = [page_indices[idx] for idx in order]
-        self.level_dims = [level_dims[idx] for idx in order]
-        self.level_downsamples = [scales[idx] for idx in order]
-        # self.n_levels = len(self.level_downsamples)
+            self.page_indices = page_indices  # temporarily keep this for compatibility, remove in future
+            self.level_dims = level_dims
+            self.level_downsamples = scales
+            self.page_index_rss = 'series:0'
+            self.axis_map = axis_map
+            # self.n_levels = len(self.level_downsamples)
+            
+            ## We use slide.pages to extract information that are not storted in slide.series
+            page_mapping = {}  # {page_id: level_id (series_id)}
+            for page_idx, page in enumerate(slide.pages):
+                if 'label' in page.keyframe.description or 'macro' in page.keyframe.description:
+                    page_mapping[page_idx] = None
+                if page.keyframe.tilewidth == 0 or page.keyframe.tilelength == 0:
+                    page_mapping[page_idx] = None
+                h, w = page.shape[0], page.shape[1]
+                try:
+                    page_mapping[page_idx] = self.level_dims.index((w, h))
+                except:
+                    page_mapping[page_idx] = None
+            self.page_mapping = page_mapping
+        else:
+            level_dims, scales, page_indices = [(slide.pages[0].shape[1], slide.pages[0].shape[0])], [1.0], [0]
+            for page_idx, page in enumerate(slide.pages[1:], 1):
+                if 'label' in page.description or 'macro' in page.description:
+                    continue
+                if page.tilewidth == 0 or page.tilelength == 0:
+                    continue
+                h, w = page.shape[0], page.shape[1]
+                if round(level_dims[0][0]/w) == round(level_dims[0][1]/h):
+                    level_dims.append((w, h))
+                    scales.append(level_dims[0][0]/w)
+                    page_indices.append(page_idx)
+
+            order = sorted(range(len(scales)), key=lambda x: scales[x])
+            self.page_indices = [page_indices[idx] for idx in order]
+            self.level_dims = [level_dims[idx] for idx in order]
+            self.level_downsamples = [scales[idx] for idx in order]
+            self.page_index_rss = 'pages'
+            self.axis_map = {'height': 0, 'width': 1, 'channel': 2}
+            # self.n_levels = len(self.level_downsamples)
+            
+            page_mapping = {}  # {page_id: level_id}
+            for page_idx in range(len(slide.pages)):
+                try:
+                    page_mapping[page_idx] = self.page_indices.index(page_idx)
+                except:
+                    page_mapping[page_idx] = None
+            self.page_mapping = page_mapping            
 
     @property
     def level_dimensions(self):
@@ -2582,20 +2626,25 @@ class Slide:
                       for x in self.level_downsamples]
             scales = [self.level_downsamples[lvl] / fh.level_downsamples[osr_level] 
                       for lvl, osr_level in enumerate(levels)]
-            self._osr_map = {'levels': levels, 'scales': scales,}
+            osr_map = {'levels': levels, 'scales': scales,}
         elif engine == 'tifffile':
             if fh is None:
                 fh = TiffFile(self.img_file, **kwargs)
-            self._osr_map = {}
+            assert isinstance(fh, TiffFile), f"fh is an instance of {type(fh)}, but specify engine={engine}."
+            assert self.page_index_rss.startswith('series'), f"TiffFile now using `series` instead of `pages`."
+            osr_map = {}
         elif engine == 'simpletiff':
+            from simpletiff import SimpleTiff
             if fh is None:
-                from simpletiff import SimpleTiff
                 fh = SimpleTiff(self.img_file, **kwargs)
-            self._osr_map = {}
+            assert isinstance(fh, SimpleTiff), f"fh is an instance of {type(fh)}, but specify engine={engine}."
+            assert self.page_index_rss == 'pages', f"Currently SimpleTiff doesn't support series. "
+            osr_map = {}
         else:
             raise ValueError(f"Engine: {engine} must be one from ['openslide', 'tifffile', 'simpletiff'].")
         
         self._fh = fh
+        self._osr_map = osr_map
         self.engine = engine
         
         return self
@@ -2604,6 +2653,7 @@ class Slide:
         if close:
             self._fh.close()
         self._fh = None
+        self._osr_map = {}
         self.engine = None
 
         return self
@@ -2658,6 +2708,7 @@ class Slide:
     def get_patch(self, x=None, level=0):
         ## TODO: change level to image_size, support get_patch on any dimension
         # t0 = time.time()
+        level = level % len(self.level_dims)
         if x is None:
             return self.get_page(level)
         
@@ -2672,14 +2723,20 @@ class Slide:
             patch = self._fh.read_region((osr_x0, osr_y0), osr_level, (osr_w, osr_h))
             # t4 = time.time()
         elif self.engine == 'tifffile':
-            # tifffile don't reorder page, so need convertion here. Little bit slow.
-            tiff_page_idx = self.page_indices[level] % len(self._fh.pages)
-            patch = tiff_page_read_region(self._fh.pages[tiff_page_idx], x0, y0, w, h)[0]
+#             assert isinstance(fh, TiffFile), f"fh is an instance of {type(fh)}, but specify engine={engine}."
+#             assert self.page_index_rss.startswith('series'), f"TiffFile now using `series` instead of `pages`."
+            series = int(self.page_index_rss.split(':')[-1])  # 'series:0'
+            pages = self._fh.series[series].levels[level]
+            patches = [tiff_page_read_region(page, x0, y0, w, h)[0] for page in pages]
+            patch = np.concatenate(patches, axis=-1)
             if len(patch.shape) == 3 and patch.shape[-1] == 1:  # single channel
                 patch = patch[..., 0]
             patch = Image.fromarray(patch)
         elif self.engine == 'simpletiff':
-            # tifffile don't reorder page, so need convertion here. Little bit slow.
+            # simpletiff current doesn't support series, still using self.pages and self.page_indices
+#             assert isinstance(fh, SimpleTiff), f"fh is an instance of {type(fh)}, but specify engine={engine}."
+#             assert self.page_index_rss == 'pages', f"Currently SimpleTiff doesn't support series. "
+            # Unlike self._fh.series, self._fh.pages are not ordered by scale
             tiff_page_idx = self.page_indices[level] % len(self._fh.pages)
             patch = self._fh.read_region(self._fh.pages[tiff_page_idx], x0, y0, w, h)[0]
             if len(patch.shape) == 3 and patch.shape[-1] == 1:  # single channel
@@ -2696,10 +2753,20 @@ class Slide:
         return self._fh.read_region((x0, y0), level, (w, h))
 
     def get_page(self, level=0):
-        with open(self.img_file, 'rb') as fp:
-            fh = TiffFile(fp)
-            tiff_page_idx = self.page_indices[level] % len(fh.pages)
-            return fh.pages[tiff_page_idx].asarray()
+        series = 0
+        with TiffFile(self.img_file) as fh:
+            page = fh.series[series].levels[level].asarray()
+            order = [self.axis_map['height'], self.axis_map['width']]
+            order += [x for x in range(len(self.axis_map)) if x not in order]
+
+            return page.transpose(order)
+
+    def get_level_image(self, level=0):
+        return self.get_page(level=level)
+
+    def get_page_by_id(self, page_id=0):
+        with TiffFile(self.img_file) as fh:
+            return fh.pages[page_id].asarray()
 
     def thumbnail(self, image_size=None, memory_limit=None):
         """ return a thumbnail in PIL image format.
@@ -2745,21 +2812,23 @@ class Slide:
             w, h = self.level_dims[level]
             scale = min(image_size[0] / w, image_size[1] / h)
             w_m, h_m = round(w * scale), round(h * scale)
-            
+
         img = cv2.resize(self.get_page(level), (w_m, h_m), interpolation=cv2.INTER_LINEAR)
         img = rgba2rgb(img, background=bg)
+        r = max(img.shape) / 64
 
-        # Otsu thresholding
-        mask = np.logical_or.reduce([_ <= skimage.filters.threshold_otsu(_) 
-                                     for _ in np.moveaxis(img, -1, 0)])
+        # Use Entropy mask then apply otsu threshold
+        entropy = [skimage.filters.rank.entropy(_, skimage.morphology.disk(r))
+                   for _ in np.moveaxis(img, -1, 0)]
+        mask = np.logical_or.reduce([_ >= skimage.filters.threshold_otsu(_) for _ in entropy])
         if exclude_fn is not None and callable(exclude_fn):
             mask = np.logical_and(mask, ~exclude_fn(img))
-        
-        # Dilation, remove small objects and holes
-        if SKIMAGE_VERSION >= '0.19':
-            mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(3))
-        else:
-            mask = skimage.morphology.binary_dilation(mask, selem=skimage.morphology.disk(3))
+
+#         # Dilation, remove small objects and holes
+#         if SKIMAGE_VERSION >= '0.19':
+#             mask = skimage.morphology.binary_dilation(mask, footprint=skimage.morphology.disk(3))
+#         else:
+#             mask = skimage.morphology.binary_dilation(mask, selem=skimage.morphology.disk(3))
         mask = skimage.morphology.remove_small_objects(mask, min_size=min_obj * w_m * h_m)
         mask = skimage.morphology.remove_small_holes(mask, area_threshold=max_hole * w_m * h_m)
 
