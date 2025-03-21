@@ -25,7 +25,7 @@ def analyze_one_patch(img, model, dataset_configs, mpp=None, compute_masks=True,
 
     ## rescale
     if mpp is not None and mpp != dataset_configs['mpp']:
-        scale_factor = dataset_configs['mpp'] / mpp
+        scale_factor = mpp / dataset_configs['mpp']
         img_rescale = F.interpolate(img[None], scale_factor=scale_factor, mode='bilinear', align_corners=False)[0] 
     else:
         scale_factor = 1.0
